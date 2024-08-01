@@ -12,16 +12,12 @@
 
 // the main loop should execute at around 700 instructions per second
 
-// the timer should execute independently and should decrement at
+// the timer should loop independently and should decrement at
 // 60 times a second
 
 
 
 
-// instructions are 2 bytes long and are separated
-// into broad catergories based on their first nibble (half octet)
-
-// right?
 
 
 // https://en.wikipedia.org/wiki/Nibble
@@ -33,6 +29,9 @@
 // an instruction is two bytes and thus four nibbles (0000-FFFF)
 
 
+// instructions are separated
+// into broad catergories based on their first nibble (half octet)
+
 
 
 
@@ -41,7 +40,7 @@
 // 2-byte program counter
 // 16 registers (V0-VF)
 
-use std::time::{Duration, SystemTime};
+use std::{io::stdout, time::{Duration, SystemTime}};
 
 
 
@@ -69,15 +68,39 @@ fn test_draw_sprite() {
 }
 
 fn test_draw_display(d: &[u64; 32]) {
-    for i in d {
-        println!("{} ", i);
+    for line_64 in d {
+        println!("{:066b}", line_64);
     }
 }
 
-// load two bytes from chunk
+fn test_print_registers(r: &[u8; 16]) {
+    print!("\n");
+    for i in 0..16 {
+        if i % 4 == 0 { print!("\n"); }
+
+        print!("V{:#x} {:#x} // ", i, r[i]);
+    }
+    print!("\n");
+}
+
+fn test_print_slice(s: &[u8]) {
+    for byte in s {
+        print!("{:#x}, ", byte);
+    }
+    print!("\n");
+}
+
+
+
+// the PC is at a location
+// load two bytes from there
+// then increment PC by two bytes
+
 fn fetch(pc: &u16) {
 
 }
+
+
 
 // would it be better to use a tuple?
 
@@ -86,45 +109,82 @@ fn fetch(pc: &u16) {
 // from_le_bytes
 // from_be_bytes
 
-fn decode(instruction: &u16) {
+// debug print off
+// macro
+
+
+// could put the importand stuff in a struct
+// "state"
+
+// the "as usize" bother me
+
+
+fn decode(instruction: &u16, d: &mut[u64; 32], r: &mut [u8; 16], i: &mut u16) {
+    // byte order big endian here
+
     let first_nibble = (instruction >> 12) & 0x000F;
+
     let x = (instruction >> 8) & 0x000F;
     let y = (instruction >> 4) & 0x000F;
-
-    // println!("{:#x}", first_nibble);
-
-
-    // x
-    // y
-
-    // n
-    // nn
-    // nnn
 
     let n = (instruction) & 0x000F;
     let nn = (instruction) & 0x00FF;
     let nnn = (instruction) & 0x0FFF;
-    // println!("{:#x}", nnn);
 
     match first_nibble {
         0x0 => {
+            // E0
             println!("clear screen");
+
+            *d = [0_u64; 32];
+            // EE
+
         },
         0x1 => {
             println!("jump {:#x}", nnn);
+
+
         },
         0x6 => {
             println!("set register {:#x} to {:#x}", x, nn);
+
+            let nn = nn.to_be_bytes()[1];
+
+            r[x as usize] = nn;
         },
         0x7 => {
-            println!("add to register {:#x} value {:#x}", x, nn);
+            println!("add to register {:#x}, value {:#x}", x, nn);
+
+            let nn = nn.to_be_bytes()[1];
+
+            r[x as usize] += nn;
         },
         0xA => {
             println!("set index register I, {:#x}", nnn);
+
+            *i = nnn;
+
         },
         0xD => {
-            println!("display / draw x:{:#x} y:{:#x} n:{:#x}", x, y, n);
+            print!("display / draw ... ");
+            print!("x: V{:#x} {:#x}, y: V{:#x} {:#x} .. ", x, r[x as usize], y, r[y as usize]);
+            print!("n: {:#x} .. ", n);
+            print!("I: {:#x} .. ", i);
+            print!("\n");
+
         },
+        0xF => {
+            print!("retreive font address of character V{:#x} {:#x} ... ", x, r[x as usize]);
+
+            let address = 5 * r[x as usize];
+
+
+            print!("{:#x}\n", address);
+            // set i to address
+
+
+        },
+
         _ => panic!()
     }
 }
@@ -132,17 +192,37 @@ fn decode(instruction: &u16) {
 
 fn main() {
     // initialize main chunk
-
     let mut chunk: [u8; 4096] = [0; 4096];
 
-    // program counter - PC
+
+    // memcopy here
+
+    chunk[  0..5].copy_from_slice(&FONT_0);
+    chunk[ 5..10].copy_from_slice(&FONT_1);
+    chunk[10..15].copy_from_slice(&FONT_2);
+    chunk[15..20].copy_from_slice(&FONT_3);
+    chunk[20..25].copy_from_slice(&FONT_4);
+    chunk[25..30].copy_from_slice(&FONT_5);
+    chunk[30..35].copy_from_slice(&FONT_6);
+    chunk[35..40].copy_from_slice(&FONT_7);
+    chunk[40..45].copy_from_slice(&FONT_8);
+    chunk[45..50].copy_from_slice(&FONT_9);
+    chunk[50..55].copy_from_slice(&FONT_A);
+    chunk[55..60].copy_from_slice(&FONT_B);
+    chunk[60..65].copy_from_slice(&FONT_C);
+    chunk[65..70].copy_from_slice(&FONT_D);
+    chunk[70..75].copy_from_slice(&FONT_E);
+    chunk[75..80].copy_from_slice(&FONT_F);
+
+
+
+    test_print_slice(&chunk[0x4B..0x50]);
+
+
 
     let mut pc: u16 = 0;
 
 
-
-    // let instruction = [chunk[(pc as usize)], chunk[(pc as usize)+1]];
-    // pc += 2;
 
 
     // 00E0 (clear screen)
@@ -153,23 +233,42 @@ fn main() {
     // DXYN (display/draw)
 
 
-    decode(&0x00E0);
-    decode(&0x1777);
-    decode(&0x6344);
-    decode(&0x7233);
-    decode(&0xA765);
-    decode(&0xD231);
-
-    
-
+    // FX29 (font character in register VX)
 
 
     // load font
 
     let mut display: [u64; 32] = [0; 32];
 
+    let mut index_register: u16 = 0;
+
+    let mut v0vf: [u8; 16] = [0; 16];
+
+
+    decode(&0x00E0, &mut display, &mut v0vf, &mut index_register);
+
+    // decode(&0x1777);
+
+    decode(&0x6341, &mut display, &mut v0vf, &mut index_register);
+
+    decode(&0x7233, &mut display, &mut v0vf, &mut index_register);
+
+    decode(&0xA765, &mut display, &mut v0vf, &mut index_register);
+
+    decode(&0xD231, &mut display, &mut v0vf, &mut index_register);
+    
+
+    decode(&0x600F, &mut display, &mut v0vf, &mut index_register);    
+    decode(&0xF029, &mut display, &mut v0vf, &mut index_register);
+
+
+
+
+    test_print_registers(&v0vf);
+
 
     // test_draw_display(&display);
+
 
     // stack is used to call and return from subroutines
     // stack memory can be outside of the emulated memory
@@ -211,3 +310,6 @@ fn main() {
     // which makes sense
     // because they're elements that are next to eachother in system memory
 
+
+// https://stackoverflow.com/questions/44690439/how-do-i-print-an-integer-in-binary-with-leading-zeros
+// https://doc.rust-lang.org/rust-by-example/attribute/cfg.html
