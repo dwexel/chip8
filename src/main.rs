@@ -49,7 +49,7 @@
 #![allow(unused)]
 
 
-use std::{io, process::exit, time::{Duration, SystemTime}};
+use std::{env, fs::File, io::{self, Read}, process::exit, time::{Duration, SystemTime}};
 use rand;
 
 
@@ -508,9 +508,15 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 			// panic stricken
 			// v[x] += nn;
 
-			if let Some(val) = v[x].checked_add(nn) {
-				v[x] = val;
-			}
+			// supposed to overflow?
+
+			// flag?
+
+			v[x] = v[x].wrapping_add(nn);
+
+			// if let Some(val) = v[x].checked_add(nn) {
+			// 	v[x] = val;
+			// }
 		}
 
 		0x8 => {
@@ -533,7 +539,9 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 				}
 				0x4 => {
+					// no
 					println!("set V{x:#x} += V{y:#x}");
+
 					match v[x].checked_add(v[y]) {
 						Some(val) => {
 							v[x] = val;
@@ -541,11 +549,15 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 						}
 						None => {
 							println!("integer overflow");
+
+							// it's meant to wrap...
+							v[x] = v[x].wrapping_add(v[y]);
 							v[0xF] = 1;
 						}
 					}   
 				}
 				0x5 => {
+					// no
 					println!("set V{x:#x} to V{x:#x} - V{y:#x}");
 					match v[x].checked_sub(v[y]) {
 						Some(val) => {
@@ -554,13 +566,15 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 						}
 						None => {
 							println!("integer underflow");
+
+							// it's meant to wrap...
+							v[x] = v[x].wrapping_sub(v[y]);
 							v[0xF] = 0;
 						}
 					}
 				}
 				0x6 => {
 					println!("bit shift V:{x:#x} right 1");
-					// options
 
 					if v[x] & 0b00000001 == 0b00000001 {
 						print!("bit 1 was shifted out");
@@ -726,9 +740,9 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 					println!("{number}, {hundders}, {tens}, {ones}");
 
-					chunk[(*i as usize)] = hundders;
-					chunk[(*i as usize) + 1] = tens;
-					chunk[(*i as usize) + 2] = ones;
+					chunk[(*i)] = hundders;
+					chunk[(*i) + 1] = tens;
+					chunk[(*i) + 2] = ones;
 				}
 				0x55 => {
 					println!("retreive memory to V0 - V{x:#x}");
@@ -813,7 +827,7 @@ fn main() {
 
 	// execution rate
 
-	let e_rate = Duration::from_secs(1);
+	let e_rate = Duration::from_secs(1 / 10);
 	let mut start = SystemTime::now();
 
 	let t_rate = Duration::from_secs(1 / 60);
@@ -824,17 +838,23 @@ fn main() {
 
 
 
-	let mut rw = rewrite::State::new();
-	draw!(rw, 0xF, 5, 5, 5);
+	// let mut rw = rewrite::State::new();
+	// draw!(rw, 0xF, 5, 5, 5);
 	// data!(rw, 'b', ...)
 	// draw!(rw, 'b', 10, 10, 10);
 
 	// copy rw to program
-	chunk[pc..0xFFF].copy_from_slice(&rw.program[0..rewrite::PROGRAM_LEN]);
+	// chunk[pc..0xFFF].copy_from_slice(&rw.program[0..rewrite::PROGRAM_LEN]);
+	// test_print_slice_as_u16(&chunk[pc..pc+24]);
 
-	test_print_slice_as_u16(&chunk[pc..pc+24]);
 
 
+	if let Some(fname) = env::args().nth(1) {
+		println!("The filename argument is {}", fname);
+
+		let mut f = File::open(fname).expect("bad filename");
+		f.read(&mut chunk[pc..0xFFF]).expect("ughhhhghghg");
+	}
 
 	loop {
 
