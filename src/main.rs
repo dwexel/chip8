@@ -46,28 +46,24 @@
 
 #![feature(macro_metavar_expr)]
 
+#![allow(unused)]
 
 
-use std::{fmt, io::{self, stdout, Read}, sync::mpsc::{self, Receiver, TryRecvError}, thread::{self, sleep}, time::{Duration, SystemTime}};
+use std::{io, process::exit, time::{Duration, SystemTime}};
 use rand;
 
 
 
 mod rewrite{
-	use std::collections::{HashMap, HashSet};
+	use std::collections::HashMap;
 
 	type Symbols = HashMap<String, usize>;
-
-
 
 	// the point at which this 
 	// is loaded into the program...
 	// todo ...
 
-	pub const PROGRAM_START: usize = 0x200;
-
-
-	pub const PROGRAM_LEN: usize = 0x200;
+	pub const PROGRAM_LEN: usize = 0xFFF - 0x200; 
 	pub const DATA_SECTION: usize = (PROGRAM_LEN / 2);
 
 	
@@ -84,8 +80,13 @@ mod rewrite{
 			Self {
 				symbols: Symbols::new(),
 				program: [0; PROGRAM_LEN],
-				pcc: DATA_SECTION,
+				pcc: 0,
 			}
+		}
+
+		pub fn byte_push(&mut self, b: u8) {
+			self.program[self.pcc] = b;
+			self.pcc += 1;
 		}
 	}
 }
@@ -103,14 +104,23 @@ mod rewrite{
 macro_rules! data {
 	($state:expr, $i:expr, $($e:expr)*) => {{
 
-		// uses big endian bytes
+		
+		// find the next empty placce in data
 
-		// set symbol here (name plus current location of pcc)
+		let pcc = rewrite::DATA_SECTION;
+
+
+		while $state.program != 0 {
+			pcc += 1;
+		}
+
 
 		$state.symbols.insert(
 			String::from($i), 
 			 
-			rewrite::PROGRAM_START + $state.pcc
+			 pcc
+			// rewrite::DATA_SECTION + 2; 
+			// rewrite::PROGRAM_START + $state.pcc
 
 			);
 
@@ -132,14 +142,10 @@ macro_rules! data {
 		
 			if ii == 7 {
 				println!("add one byte to Read-only");
-
-				// set program to pcc and increment pcc
 				
-				$state.program[
-					$state.pcc
-				] = byte;
+				$state.program[pcc] = byte;
 
-				$state.pcc += 1;
+				pcc += 1;
 
 				println!("starting next byte...");
 
@@ -148,52 +154,96 @@ macro_rules! data {
 		}
 
 		$state
-
 	}};
 }
+
 
 // todo
 // make number of rows optional
 // todo
-// let it use literal data
-// or even a variable register
 
+// let it use a font data
+// 
+// or "data"
+//
 
-// yeah
 
 macro_rules! draw {
 	($state:expr, $name:expr, $x:expr, $y:expr, $rows:expr) => {
-		// parameters: name, location, number of rows 
-
-		// fetch data from symbols
-
-		// let s = $state.symbols;
-
-		// if let Some(addr) = s.get($name) {
-		// 	// set I
-		// 	// call draw
-
-		// 	// we have a problem
-		// }
 
 
-		// move into registers
-		// then draw
 
-		// $state.program
+		
+		println!("draw font charater {:#x} at x {:#x}, y {:#x}, rows {:#x}", $name, $x, $y, $rows);
+
+		// 6XNN
+		// FX29
+		let nn = $name as u8;
+		let x = 0x01;		
+
+		let mut b: u8 = 0x06 << 4;
+		b = b | x;
+
+		$state.byte_push(b);
+
+		b = nn;
+
+		$state.byte_push(b);
+
+		b = 0x0F << 4;
+		b = b | x;
+
+		$state.byte_push(b);
+
+		b = 0x29;
+
+		$state.byte_push(b);
+
+		// 6XNN
+		let x = 0x01;
+		let nn = $x as u8;
 
 
+		b = 0x06 << 4;
+		b = b | x;
+
+		$state.byte_push(b);
+
+		b = nn;
+
+		$state.byte_push(b);
+
+		// 6XNN
+		let x = 0x02;
+		let nn = $y as u8;
+
+
+		b = 0x06 << 4;
+		b = b | x;
+
+		$state.byte_push(b);
+
+		b = nn;
+
+		$state.byte_push(b);
+
+
+		// DXYN
+		let x = 0x01;
+		let y = 0x02;
+		let n = $rows as u8;
+
+		b = 0x0D << 4;
+		b = b | x;
+
+		$state.byte_push(b);
+
+		b = y << 4;
+		b = b | n;
+
+		$state.byte_push(b);
 	};
 }
-
-
-
-macro_rules! print_program {
-	($state:expr) => {
-		println!("{:?}", $state.1);
-	};
-}
-
 
 
 
@@ -369,7 +419,7 @@ fn fetch(pc: &mut usize, chunk: &[u8; 4096]) -> u16 {
 
 // decode and execute after fetching
 
-fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut u16, pc: &mut usize, chunk: &mut [u8], stack: &mut Stack) {
+fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, pc: &mut usize, chunk: &mut [u8], stack: &mut Stack, t: &mut u8, st: &mut u8) {
 	// byte order big endian here
 
 	let first_nibble = (instruction >> 12) & 0x000F;
@@ -565,7 +615,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut u16, pc:
 		0xA => {
 			db!("set index register I, {:#x}", nnn);
 
-			*i = nnn;
+			*i = nnn as usize;
 		}
 		// 0xB => {
 
@@ -589,13 +639,13 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut u16, pc:
 
 			v[0xF] = 0;
 
-			for _i in (*i)..(*i+n) {
+			for _i in (*i)..(*i+(n as usize)) {
 
 				if y == 32 { break; }
 
 				// get the font data
 
-				let data_row: u8 = chunk[_i as usize];
+				let data_row: u8 = chunk[_i];
 
 				// x -> x +
 				// left -> right
@@ -629,27 +679,40 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut u16, pc:
 		}
 		0xF => {
 
-			// print!("retreive font address of character V{:#x} {:#x} ... ", x, v[x]);
-
-			// let address = 5 * (v[x] as u16);
-
-			// print!("{:#x}\n", address);
-
-			// *i = address as u16;
 		
 			match nn {
-				0x07 => {
-					db!("set V{:#x} to value of timer: {:#x}", x, 100);
+				0x29 => {
+					print!("retreive font address of character V{:#x} {:#x} ... ", x, v[x]);
 
+					let address = 5 * (v[x] as usize);
+
+					print!("{:#x}\n", address);
+
+					*i = address;
+				}
+
+
+				0x0A => {
+					db!("wait for key...");
+
+					db!("got key");
+				}
+
+
+				0x07 => {
+					db!("set V{:#x} to value of timer, that being: {:#x}", x, t);
+
+					v[x] = *t;
 				}
 				0x15 => {
 					db!("set timer to V{:#x} {:#x}", x, v[x]);
 
+					*t = v[x];
 				}
 				0x18 => {
 					db!("set sound timer to V{:#x} {:#x}", x, v[x]);
 
-
+					*st = v[x];
 				}
 				0x33 => {
 					println!("binary-coded decimal conversion");
@@ -719,6 +782,8 @@ fn main() {
 	// initialize main chunk
 	let mut chunk: [u8; 4096] = [0; 4096];
 
+	// insert font data
+
 	chunk[ 0..5 ].copy_from_slice(&[0xF0, 0x90, 0x90, 0x90, 0xF0]); // 0
 	chunk[ 5..10].copy_from_slice(&[0x20, 0x60, 0x20, 0x20, 0x70]); // 1
 	chunk[10..15].copy_from_slice(&[0xF0, 0x10, 0xF0, 0x80, 0xF0]); // 2
@@ -739,78 +804,79 @@ fn main() {
 	// in reality, is a 16 bit number
 	let mut pc: usize = 0x200;
 
-
 	let mut stack = Stack::new();
 	let mut display: [u64; 32] = [0; 32];
-	let mut i_r: u16 = 0;
+
+	// also in reality a 16bit
+	let mut i_r: usize = 0;
 	let mut v0vf: [u8; 16] = [0; 16];
 
 	// execution rate
 
-	let seconds = Duration::from_secs(1);
+	let e_rate = Duration::from_secs(1);
 	let mut start = SystemTime::now();
 
+	let t_rate = Duration::from_secs(1 / 60);
+	let mut t_start = SystemTime::now();
 
-
-	// let mut timer = Duration::from_secs(2);
-
-	let mut timer_delta = SystemTime::now();
-	let mut timer = Duration::from_secs(4);
-
-
+	let mut timer: u8 = 0;
+	let mut sound_timer: u8 = 0;
 
 
 
-	decode(0xA220, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack);
-	decode(0x61FC, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack);
-	decode(0xF133, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack);
+	let mut rw = rewrite::State::new();
+	draw!(rw, 0xF, 5, 5, 5);
+	// data!(rw, 'b', ...)
+	// draw!(rw, 'b', 10, 10, 10);
 
+	// copy rw to program
+	chunk[pc..0xFFF].copy_from_slice(&rw.program[0..rewrite::PROGRAM_LEN]);
 
-	place(0x1200, pc, &mut chunk);
-
-
-
-
-	if chunk[pc as usize] == 0 { 
-		println!("no instructions");
-		return;
-	}
-
+	test_print_slice_as_u16(&chunk[pc..pc+24]);
 
 
 
 	loop {
+
+		match t_start.elapsed() {
+			Ok(elapsed) if elapsed > t_rate => {
+				t_start = SystemTime::now();
+
+				if timer > 0 {
+					timer -= 1;
+					println!("timeout");
+				}
+
+				if sound_timer > 0 {
+					timer -= 1;
+					println!("sound timer timeout");
+				}
+			}
+			_ => ()
+		}
+
 		match start.elapsed() {
-			Ok(elapsed) if elapsed > seconds => {
+			Ok(elapsed) if elapsed > e_rate => {
 				db!("execution now");
 
 				start = SystemTime::now();
 
 				let instruction = fetch(&mut pc, &chunk);
 
-				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack);
+				if instruction == 0_u16 {
+					println!("sayonara!");
+					pc -= 2;
+					exit(0);
+				}
 
-				println!("{:?}", timer);
+				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack, &mut timer, &mut sound_timer);
+				test_draw_display(&display);
+				test_print_registers(&v0vf);
 
-
-				// test_draw_display(&display);
-
-				// if DB_REGISTERS {
-				// 	test_print_registers(&v0vf);
-				// }
 			}
 			_ => ()
 		}
 
-		// wait
-
-		if timer > Duration::ZERO {
-			timer = timer.saturating_sub(
-					SystemTime::now().duration_since(timer_delta).unwrap()
-				);
-			timer_delta = SystemTime::now();
-
-		}
 	}
 }
 
