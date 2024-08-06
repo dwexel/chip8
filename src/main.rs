@@ -58,10 +58,9 @@ mod rewrite{
 	use std::collections::HashMap;
 
 	type Symbols = HashMap<String, usize>;
+	type Assignments = [bool; 16];
 
-	// the point at which this 
-	// is loaded into the program...
-	// todo ...
+
 
 	pub const PROGRAM_LEN: usize = 0xFFF - 0x200; 
 	pub const DATA_SECTION: usize = (PROGRAM_LEN / 2);
@@ -73,6 +72,8 @@ mod rewrite{
 		pub symbols: Symbols,
 		pub program: [u8; PROGRAM_LEN],
 		pub pcc: usize,
+
+		pub assignments: Assignments,
 	}
 
 	impl State {
@@ -81,6 +82,7 @@ mod rewrite{
 				symbols: Symbols::new(),
 				program: [0; PROGRAM_LEN],
 				pcc: 0,
+				assignments: [false; 16]
 			}
 		}
 
@@ -102,76 +104,123 @@ mod rewrite{
 
 
 macro_rules! data {
-	($state:expr, $i:expr, $($e:expr)*) => {{
-
+	($state:expr, $i:expr, $($e:expr)*) => {
 		
 		// find the next empty placce in data
 
-		let pcc = rewrite::DATA_SECTION;
+		let _pcc = rewrite::DATA_SECTION;
 
-
-		while $state.program != 0 {
-			pcc += 1;
+		while $state.program[_pcc] != 0 {
+			_pcc += 1;
 		}
-
 
 		$state.symbols.insert(
 			String::from($i), 
-			 
-			 pcc
-			// rewrite::DATA_SECTION + 2; 
-			// rewrite::PROGRAM_START + $state.pcc
-
+			_pcc
 			);
 
+		let bytes: [ u8; ${count($e)} ] = [ $( $e, )* ];
 
-		let bytes: [ bool; ${count($e)} ] = [
-			$(
-				($e != 0),
-			)*
-		];
-
-		let mut byte: u8 = 0;
-
-		for i in 0..bytes.len() {
-			let ii = i % 8;
-
-			set_bit_8(&mut byte, ii as u8, bytes[i]);
-
-			print!("{i:?} \n");
-		
-			if ii == 7 {
-				println!("add one byte to Read-only");
-				
-				$state.program[pcc] = byte;
-
-				pcc += 1;
-
-				println!("starting next byte...");
-
-				byte = 0;
-			}
+		for b in bytes {
+			$state.program[_pcc] = b;
+			_pcc += 1;
 		}
-
-		$state
-	}};
+	};
 }
 
 
 // todo
 // make number of rows optional
-// todo
+
 
 // let it use a font data
 // 
 // or "data"
 //
 
+// yeah macros maybe not cutting it?
+// proc macros?
+
+macro_rules! draw_data {
+	($state:expr, $name:expr, $x:expr, $y:expr, $rows:expr) => {
+
+
+
+		match $state.symbols.get($name) {
+			Some(addr) => {
+
+
+				$state.assignments[0x01] = true;
+				$state.assignments[0x02] = true;
+
+				
+				println!("draw data charater named {} at x {:#x}, y {:#x}, rows {:#x}", $name, $x, $y, $rows);
+
+
+				// ANNN
+				let nnn = addr;
+
+				// 6XNN
+				let x = 0x01;
+				let nn = $x as u8;
+
+
+				b = 0x06 << 4;
+				b = b | x;
+
+				$state.byte_push(b);
+
+				b = nn;
+
+				$state.byte_push(b);
+
+				// 6XNN
+				let x = 0x02;
+				let nn = $y as u8;
+
+
+				b = 0x06 << 4;
+				b = b | x;
+
+				$state.byte_push(b);
+
+				b = nn;
+
+				$state.byte_push(b);
+
+
+				// DXYN
+				let x = 0x01;
+				let y = 0x02;
+				let n = $rows as u8;
+
+				b = 0x0D << 4;
+				b = b | x;
+
+				$state.byte_push(b);
+
+				b = y << 4;
+				b = b | n;
+
+				$state.byte_push(b);
+			
+				$state.assignments[0x01] = false;
+				$state.assignments[0x02] = false;
+
+
+
+			},
+			None => panic!(),
+		}
+	}
+}
 
 macro_rules! draw {
 	($state:expr, $name:expr, $x:expr, $y:expr, $rows:expr) => {
 
 
+		$state.assignments[0x01] = true;
+		$state.assignments[0x02] = true;
 
 		
 		println!("draw font charater {:#x} at x {:#x}, y {:#x}, rows {:#x}", $name, $x, $y, $rows);
@@ -242,6 +291,10 @@ macro_rules! draw {
 		b = b | n;
 
 		$state.byte_push(b);
+	
+		$state.assignments[0x01] = false;
+		$state.assignments[0x02] = false;
+
 	};
 }
 
