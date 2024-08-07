@@ -3,37 +3,39 @@
 // first 512 are empty (000-1FF)
 // 
 // except for the font
-
-
-
+//
+// so the program starts at 0x200
+//
 // only 12 bytes are required to address the 4096 bytes of memory
+//
 // but in practice, 16-bit numbers are used as addresses
 
 
 
 
-
-
-
-
 // a nibble is half a byte (0-F)
+//
 // an instruction is two bytes and thus four nibbles (0000-FFFF)
 
 
-// instructions are separated 
-// into broad catergories based on their first nibble (half octet)
+// instructions are separated into broad catergories based on their first nibble (half octet)
+//
+//
 
 // which by the first we mean most significant
-// so 
-// here, we're using big endian
-// IBM logo program is stored in BE
+
+
+
+// all the chip8 programs I've seen so far have been stored in big endian
+// meaning the most significant bit of a word () is earlier in the program 
+
 
 
 
 
 
 // the main loop should execute at around 700 instructions per second
-
+//
 // the timer should loop independently and should decrement at
 // 60 times a second
 
@@ -44,6 +46,8 @@
 // 2-byte program counter
 // 16 one-byte registers (V0-VF)
 
+
+
 #![feature(macro_metavar_expr)]
 
 #![allow(unused)]
@@ -52,12 +56,17 @@
 use std::{env, fs::File, io::{self, Read}, process::exit, time::{Duration, SystemTime}};
 use rand;
 
+// todo
+// make program size and program start constants
+
 
 
 mod rewrite{
-	use std::collections::HashMap;
+	use std::{collections::HashMap, ops::Index};
 
-	type Symbols = HashMap<String, usize>;
+use crate::test_print_slice_as_u16;
+
+	type Symbols = HashMap<String, u8>;
 	type Assignments = [bool; 16];
 
 
@@ -67,30 +76,343 @@ mod rewrite{
 
 	
 
+
 	#[derive(Debug)]
 	pub struct State {
+		// holds 2 types: data and variables
 		pub symbols: Symbols,
-		pub program: [u8; PROGRAM_LEN],
-		pub pcc: usize,
+		
+		pub program: [u8; 4096],
+		pub pcc: u16,
 
 		pub assignments: Assignments,
+
+		pub send_forward: Vec<u16>,
+		pub send_back: Vec<u16>,
+
+		pub non_user_stack: Vec<u8>
+		// pub 
 	}
 
 	impl State {
 		pub fn new() -> Self {
 			Self {
 				symbols: Symbols::new(),
-				program: [0; PROGRAM_LEN],
-				pcc: 0,
-				assignments: [false; 16]
+				program: [0; 4096],
+
+
+				pcc: 0x200,
+
+				assignments: [false; 16],
+
+				send_forward: Vec::new(),
+				send_back: Vec::new(),
+
+				non_user_stack: Vec::new(),
 			}
 		}
 
 		pub fn byte_push(&mut self, b: u8) {
-			self.program[self.pcc] = b;
+			if (self.pcc as usize) >= DATA_SECTION {
+				panic!("ough");
+			}
+
+			self.program[self.pcc as usize] = b;
 			self.pcc += 1;
 		}
+
+		pub fn copy_program_to_memory(&self, chunk: &mut[u8; 0x1000]) {
+			chunk[0x200..0x1000].copy_from_slice(&self.program[0x200..0x1000]);
+
+		}
 	}
+
+	pub fn loop_start(state: &mut State, count: u8, name: Option<&str>) {
+
+		let x: u8;
+
+		if let Some(name) = name {
+
+			let name = String::from(name);
+
+			is_a_good_name(&name).expect("bad name compiler error grrrr");
+
+			x = find_register(&state);
+
+			println!("register V{x:#x} for name {name}");
+
+			state.symbols.insert(name, x);
+
+
+		} else {
+
+			x = find_register(&state);
+		}
+
+
+		state.assignments[x as usize] = true;
+		state.non_user_stack.push(x);
+
+
+		let mut b: u8;
+		
+		// 6XNN
+
+		let nn = 0x00;
+
+		b = 0x6 << 4; b = b | x; state.byte_push(b);
+		b = nn; state.byte_push(b);
+
+		state.send_forward.push(state.pcc as u16);
+
+		// 4XNN
+
+		let nn = count;
+
+		b = 0x4 << 4; b = b | x; state.byte_push(b);
+		b = nn; state.byte_push(b);
+
+
+		// leave an empty space
+		// for
+		// jump forward
+		// 1NNN
+		
+		state.pcc += 2;
+
+
+		// 7XNN
+		let nn = 1;
+
+		b = 0x7 << 4; b = b | x; state.byte_push(b);
+		b = nn; state.byte_push(b);
+
+	}
+
+	pub fn loop_end(state: &mut State) {
+		let mut b: u8;
+		
+		let skip_if = state.send_forward.pop().expect("error, no loop to end theoretically");
+
+		// here the address of skip_if is guaranteed to be 12 bits or fewer
+
+		// 1NNN
+		let nnn = skip_if.to_be_bytes();
+		
+		b = 0x1 << 4;
+		b = b | nnn[0];
+		state.byte_push(b);
+
+		b = nnn[1];
+		state.byte_push(b);
+
+		// 1NNN
+		let nnn = state.pcc.to_be_bytes();
+
+		b = 0x1 << 4; b = b | nnn[0];
+		state.program[(skip_if as usize) + 2] = b;
+
+		b = nnn[1];
+		state.program[(skip_if as usize) + 3] = b;
+
+
+		let loop_reg = state.non_user_stack.pop().expect("same error as above gr");
+
+		state.symbols.retain(|name, _v| {
+		
+			if *_v != loop_reg {
+				true
+			} else {
+				println!("remove named loop from symbols table V{:#x}, {}", _v, name);
+				false
+			}
+
+		});
+
+		state.assignments[loop_reg as usize] = false;
+	}
+
+	fn find_register(state: &State) -> u8 {
+
+		// could use
+		// uh
+
+		// don't use flag register ...
+
+		for i in 0..16 {
+			if !state.assignments[i] { 
+				println!("found free reg V{:#x}", i);
+
+				// state.assignments[i] = true;
+
+				return i as u8; 
+			}
+
+		}
+		panic!();
+	}
+
+	fn unfind_register(state: &mut State, reg: u8) {
+		state.assignments[reg as usize] = false;
+
+	}
+
+
+	fn is_a_good_name(name: &String) -> Result<(), ()> {
+
+		if name.is_empty() {
+			return Err(());
+		}
+
+		Ok(())
+	}
+
+	pub fn define(state: &mut State, register: Option<u8>, name: &str) {
+		let name = String::from(name);
+
+		is_a_good_name(&name).expect("bad name compiler error grrrr");
+
+		let _x = match register {
+		   Some(_x) => { _x },
+	
+		   None => {
+		   	find_register(&state)
+		   }
+		};
+
+		println!("register V{_x:#x} for name {name}");
+		state.symbols.insert(name, _x);
+		state.assignments[_x as usize] = true;
+	}
+
+
+	pub fn finish(mut state: State) {
+		for (name, _v) in state.symbols.iter() {
+			state.assignments[(*_v) as usize] = false;
+			// unfind_register(&mut state, reg)
+		}
+	}
+
+
+	pub fn increment(state: &mut State, name: &str) {
+		let _v = state.symbols.get(name).expect("symbol should exist");
+
+		let mut b: u8;
+
+		// 7XNN
+		let x = _v;
+		let nn = 1;
+
+		b = 0x7 << 4; b = b | x; state.byte_push(b);
+		b = nn; state.byte_push(b);
+	}
+
+
+	pub enum Valued {
+		Literal(u8),
+		Symbol(String),
+	}
+
+	impl From<String> for Valued {
+		fn from(value: String) -> Self {
+			todo!()
+			
+
+		}
+	}
+
+
+	pub fn draw(state: &mut State, data: Valued, x: Valued, y: Valued, rows: Valued) {
+		let emit_start = state.pcc;
+
+
+		let x = match x {
+		   Valued::Literal(x_val) => {
+				let mut b: u8;
+
+		   	//  todo
+		   	
+		   	let x = find_register(&state);
+		   	state.assignments[x as usize] = true;
+
+				// 6XNN
+				let nn = x_val;
+				b = 0x6 << 4; b = b | x; state.byte_push(b);
+				b = nn; state.byte_push(b);
+
+				x
+
+		   },
+		   Valued::Symbol(name) => {
+		   	let x = state.symbols.get(&name).expect("symbol should exist varibale for draw call  X");
+
+		   	*x
+		   },
+		};
+
+
+		let y = match y {
+		   Valued::Literal(y_val) => {
+		   	// todo
+
+		   	let y = find_register(&state);
+		   	state.assignments[y as usize] = true;
+
+				let mut b: u8;
+
+				// 6XNN
+				let nn = y_val;
+
+				b = 0x06 << 4; b = b | y; state.byte_push(b);
+				b = nn; state.byte_push(b);
+
+				y
+		   },
+		   Valued::Symbol(name) => {
+		   	let y = state.symbols.get(&name).expect("symbol should exist varibale for draw call Y");
+		   	*y
+		   },
+		};
+
+
+		match data {
+		   Valued::Literal(font_character) => {
+		   	let mut b: u8;
+
+				// 6XNN
+				let nn = font_character as u8;
+				let x = find_register(&state);
+				state.assignments[x as usize] = true;		
+
+
+				b = 0x6 << 4; b = b | x; state.byte_push(b);
+				b = nn; state.byte_push(b);
+
+				// FX29
+				b = 0xF << 4; b = b | x; state.byte_push(b);
+				b = 0x29; state.byte_push(b);
+
+				state.assignments[x as usize] = false;
+		   }
+		   _ => panic!()
+		};
+
+		let mut b: u8;
+
+		// DXYN
+		let x = x;
+		let y = y;
+		let n = 10 as u8;
+
+		b = 0xD << 4; b = b | x; state.byte_push(b);
+		b = y << 4; b = b | n; state.byte_push(b);
+
+
+		print!("draw function: ");
+		test_print_slice_as_u16(&state.program[(emit_start as usize)..(state.pcc as usize)]);
+
+	}
+
 }
 
 
@@ -104,6 +426,8 @@ mod rewrite{
 
 
 macro_rules! data {
+	// rewrite to just return an array / slice
+
 	($state:expr, $i:expr, $($e:expr)*) => {
 		
 		// find the next empty placce in data
@@ -298,7 +622,11 @@ macro_rules! draw {
 	};
 }
 
+// proc macros
 
+fn new_symbol(state: &mut rewrite::State) {
+
+}
 
 
 
@@ -850,7 +1178,6 @@ fn main() {
 	let mut chunk: [u8; 4096] = [0; 4096];
 
 	// insert font data
-
 	chunk[ 0..5 ].copy_from_slice(&[0xF0, 0x90, 0x90, 0x90, 0xF0]); // 0
 	chunk[ 5..10].copy_from_slice(&[0x20, 0x60, 0x20, 0x20, 0x70]); // 1
 	chunk[10..15].copy_from_slice(&[0xF0, 0x10, 0xF0, 0x80, 0xF0]); // 2
@@ -880,7 +1207,7 @@ fn main() {
 
 	// execution rate
 
-	let e_rate = Duration::from_secs(1 / 10);
+	let e_rate = Duration::from_secs(1);
 	let mut start = SystemTime::now();
 
 	let t_rate = Duration::from_secs(1 / 60);
@@ -891,7 +1218,43 @@ fn main() {
 
 
 
-	// let mut rw = rewrite::State::new();
+// 	rewrite::parse(r"
+// v0 i = 2
+// b = 77 
+
+// 		");
+
+
+
+
+	let mut rw = rewrite::State::new();
+
+	rewrite::define(&mut rw, None, "zar");
+	rewrite::define(&mut rw, None, "gar");
+
+	rewrite::loop_start(&mut rw, 3, Some("beach"));
+
+	rewrite::increment(&mut rw, "zar");
+	rewrite::increment(&mut rw, "gar");
+
+	rewrite::loop_end(&mut rw);
+
+
+	rewrite::draw(&mut rw, 
+			rewrite::Valued::Literal(0xf), 
+			rewrite::Valued::Literal(10), 
+			rewrite::Valued::Literal(10), 
+			rewrite::Valued::Literal(4)
+		);
+
+
+	rw.copy_program_to_memory(&mut chunk);
+
+
+
+	// test_print_slice_as_u16(&chunk[pc..pc+22]);
+
+
 	// draw!(rw, 0xF, 5, 5, 5);
 	// data!(rw, 'b', ...)
 	// draw!(rw, 'b', 10, 10, 10);
@@ -943,7 +1306,7 @@ fn main() {
 				}
 
 				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack, &mut timer, &mut sound_timer);
-				test_draw_display(&display);
+				// test_draw_display(&display);
 				test_print_registers(&v0vf);
 
 			}
