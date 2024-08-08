@@ -56,582 +56,23 @@
 use std::{env, fs::File, io::{self, Read}, process::exit, time::{Duration, SystemTime}};
 use rand;
 
-// todo
-// make program size and program start constants
 
 
-
-mod rewrite{
-	use std::{collections::HashMap, ops::Index};
-
-use crate::test_print_slice_as_u16;
-
-	type Symbols = HashMap<String, u8>;
-	type Assignments = [bool; 16];
-
-
-
-	pub const PROGRAM_LEN: usize = 0xFFF - 0x200; 
-	pub const DATA_SECTION: usize = (PROGRAM_LEN / 2);
-
-	
-
-
-	#[derive(Debug)]
-	pub struct State {
-		// holds 2 types: data and variables
-		pub symbols: Symbols,
-		
-		pub program: [u8; 4096],
-		pub pcc: u16,
-
-		pub assignments: Assignments,
-
-		pub send_forward: Vec<u16>,
-		pub send_back: Vec<u16>,
-
-		pub non_user_stack: Vec<u8>
-		// pub 
-	}
-
-	impl State {
-		pub fn new() -> Self {
-			Self {
-				symbols: Symbols::new(),
-				program: [0; 4096],
-
-
-				pcc: 0x200,
-
-				assignments: [false; 16],
-
-				send_forward: Vec::new(),
-				send_back: Vec::new(),
-
-				non_user_stack: Vec::new(),
-			}
-		}
-
-		pub fn byte_push(&mut self, b: u8) {
-			if (self.pcc as usize) >= DATA_SECTION {
-				panic!("ough");
-			}
-
-			self.program[self.pcc as usize] = b;
-			self.pcc += 1;
-		}
-
-		pub fn copy_program_to_memory(&self, chunk: &mut[u8; 0x1000]) {
-			chunk[0x200..0x1000].copy_from_slice(&self.program[0x200..0x1000]);
-
-		}
-	}
-
-	pub fn loop_start(state: &mut State, count: u8, name: Option<&str>) {
-
-		let x: u8;
-
-		if let Some(name) = name {
-
-			let name = String::from(name);
-
-			is_a_good_name(&name).expect("bad name compiler error grrrr");
-
-			x = find_register(&state);
-
-			println!("register V{x:#x} for name {name}");
-
-			state.symbols.insert(name, x);
-
-
-		} else {
-
-			x = find_register(&state);
-		}
-
-
-		state.assignments[x as usize] = true;
-		state.non_user_stack.push(x);
-
-
-		let mut b: u8;
-		
-		// 6XNN
-
-		let nn = 0x00;
-
-		b = 0x6 << 4; b = b | x; state.byte_push(b);
-		b = nn; state.byte_push(b);
-
-		state.send_forward.push(state.pcc as u16);
-
-		// 4XNN
-
-		let nn = count;
-
-		b = 0x4 << 4; b = b | x; state.byte_push(b);
-		b = nn; state.byte_push(b);
-
-
-		// leave an empty space
-		// for
-		// jump forward
-		// 1NNN
-		
-		state.pcc += 2;
-
-
-		// 7XNN
-		let nn = 1;
-
-		b = 0x7 << 4; b = b | x; state.byte_push(b);
-		b = nn; state.byte_push(b);
-
-	}
-
-	pub fn loop_end(state: &mut State) {
-		let mut b: u8;
-		
-		let skip_if = state.send_forward.pop().expect("error, no loop to end theoretically");
-
-		// here the address of skip_if is guaranteed to be 12 bits or fewer
-
-		// 1NNN
-		let nnn = skip_if.to_be_bytes();
-		
-		b = 0x1 << 4;
-		b = b | nnn[0];
-		state.byte_push(b);
-
-		b = nnn[1];
-		state.byte_push(b);
-
-		// 1NNN
-		let nnn = state.pcc.to_be_bytes();
-
-		b = 0x1 << 4; b = b | nnn[0];
-		state.program[(skip_if as usize) + 2] = b;
-
-		b = nnn[1];
-		state.program[(skip_if as usize) + 3] = b;
-
-
-		let loop_reg = state.non_user_stack.pop().expect("same error as above gr");
-
-		state.symbols.retain(|name, _v| {
-		
-			if *_v != loop_reg {
-				true
-			} else {
-				println!("remove named loop from symbols table V{:#x}, {}", _v, name);
-				false
-			}
-
-		});
-
-		state.assignments[loop_reg as usize] = false;
-	}
-
-	fn find_register(state: &State) -> u8 {
-
-		// could use
-		// uh
-
-		// don't use flag register ...
-
-		for i in 0..16 {
-			if !state.assignments[i] { 
-				println!("found free reg V{:#x}", i);
-
-				// state.assignments[i] = true;
-
-				return i as u8; 
-			}
-
-		}
-		panic!();
-	}
-
-	fn unfind_register(state: &mut State, reg: u8) {
-		state.assignments[reg as usize] = false;
-
-	}
-
-
-	fn is_a_good_name(name: &String) -> Result<(), ()> {
-
-		if name.is_empty() {
-			return Err(());
-		}
-
-		Ok(())
-	}
-
-	pub fn define(state: &mut State, register: Option<u8>, name: &str) {
-		let name = String::from(name);
-
-		is_a_good_name(&name).expect("bad name compiler error grrrr");
-
-		let _x = match register {
-		   Some(_x) => { _x },
-	
-		   None => {
-		   	find_register(&state)
-		   }
-		};
-
-		println!("register V{_x:#x} for name {name}");
-		state.symbols.insert(name, _x);
-		state.assignments[_x as usize] = true;
-	}
-
-
-	pub fn finish(mut state: State) {
-		for (name, _v) in state.symbols.iter() {
-			state.assignments[(*_v) as usize] = false;
-			// unfind_register(&mut state, reg)
-		}
-	}
-
-
-	pub fn increment(state: &mut State, name: &str) {
-		let _v = state.symbols.get(name).expect("symbol should exist");
-
-		let mut b: u8;
-
-		// 7XNN
-		let x = _v;
-		let nn = 1;
-
-		b = 0x7 << 4; b = b | x; state.byte_push(b);
-		b = nn; state.byte_push(b);
-	}
-
-
-	pub enum Valued {
-		Literal(u8),
-		Symbol(String),
-	}
-
-	impl From<String> for Valued {
-		fn from(value: String) -> Self {
-			todo!()
-			
-
-		}
-	}
-
-
-	pub fn draw(state: &mut State, data: Valued, x: Valued, y: Valued, rows: Valued) {
-		let emit_start = state.pcc;
-
-
-		let x = match x {
-		   Valued::Literal(x_val) => {
-				let mut b: u8;
-
-		   	//  todo
-		   	
-		   	let x = find_register(&state);
-		   	state.assignments[x as usize] = true;
-
-				// 6XNN
-				let nn = x_val;
-				b = 0x6 << 4; b = b | x; state.byte_push(b);
-				b = nn; state.byte_push(b);
-
-				x
-
-		   },
-		   Valued::Symbol(name) => {
-		   	let x = state.symbols.get(&name).expect("symbol should exist varibale for draw call  X");
-
-		   	*x
-		   },
-		};
-
-
-		let y = match y {
-		   Valued::Literal(y_val) => {
-		   	// todo
-
-		   	let y = find_register(&state);
-		   	state.assignments[y as usize] = true;
-
-				let mut b: u8;
-
-				// 6XNN
-				let nn = y_val;
-
-				b = 0x06 << 4; b = b | y; state.byte_push(b);
-				b = nn; state.byte_push(b);
-
-				y
-		   },
-		   Valued::Symbol(name) => {
-		   	let y = state.symbols.get(&name).expect("symbol should exist varibale for draw call Y");
-		   	*y
-		   },
-		};
-
-
-		match data {
-		   Valued::Literal(font_character) => {
-		   	let mut b: u8;
-
-				// 6XNN
-				let nn = font_character as u8;
-				let x = find_register(&state);
-				state.assignments[x as usize] = true;		
-
-
-				b = 0x6 << 4; b = b | x; state.byte_push(b);
-				b = nn; state.byte_push(b);
-
-				// FX29
-				b = 0xF << 4; b = b | x; state.byte_push(b);
-				b = 0x29; state.byte_push(b);
-
-				state.assignments[x as usize] = false;
-		   }
-		   _ => panic!()
-		};
-
-		let mut b: u8;
-
-		// DXYN
-		let x = x;
-		let y = y;
-		let n = 10 as u8;
-
-		b = 0xD << 4; b = b | x; state.byte_push(b);
-		b = y << 4; b = b | n; state.byte_push(b);
-
-
-		print!("draw function: ");
-		test_print_slice_as_u16(&state.program[(emit_start as usize)..(state.pcc as usize)]);
-
-	}
-
-}
-
-
-
-
-// todo... it should be able to take any types...
-// like hex codes..
-// 
-// and work even if a full row isn't filled out...
-
+mod rewrite;
 
 
 macro_rules! data {
-	// rewrite to just return an array / slice
-
-	($state:expr, $i:expr, $($e:expr)*) => {
-		
-		// find the next empty placce in data
-
-		let _pcc = rewrite::DATA_SECTION;
-
-		while $state.program[_pcc] != 0 {
-			_pcc += 1;
-		}
-
-		$state.symbols.insert(
-			String::from($i), 
-			_pcc
-			);
-
-		let bytes: [ u8; ${count($e)} ] = [ $( $e, )* ];
-
-		for b in bytes {
-			$state.program[_pcc] = b;
-			_pcc += 1;
-		}
-	};
+	($($e:expr)*) => {{
+		let data: [ u8; ${count($e)} ] = [ $( $e, )* ];
+		data
+	}};
 }
 
 
-// todo
-// make number of rows optional
-
-
-// let it use a font data
-// 
-// or "data"
-//
-
-// yeah macros maybe not cutting it?
-// proc macros?
-
-macro_rules! draw_data {
-	($state:expr, $name:expr, $x:expr, $y:expr, $rows:expr) => {
-
-
-
-		match $state.symbols.get($name) {
-			Some(addr) => {
-
-
-				$state.assignments[0x01] = true;
-				$state.assignments[0x02] = true;
-
-				
-				println!("draw data charater named {} at x {:#x}, y {:#x}, rows {:#x}", $name, $x, $y, $rows);
-
-
-				// ANNN
-				let nnn = addr;
-
-				// 6XNN
-				let x = 0x01;
-				let nn = $x as u8;
-
-
-				b = 0x06 << 4;
-				b = b | x;
-
-				$state.byte_push(b);
-
-				b = nn;
-
-				$state.byte_push(b);
-
-				// 6XNN
-				let x = 0x02;
-				let nn = $y as u8;
-
-
-				b = 0x06 << 4;
-				b = b | x;
-
-				$state.byte_push(b);
-
-				b = nn;
-
-				$state.byte_push(b);
-
-
-				// DXYN
-				let x = 0x01;
-				let y = 0x02;
-				let n = $rows as u8;
-
-				b = 0x0D << 4;
-				b = b | x;
-
-				$state.byte_push(b);
-
-				b = y << 4;
-				b = b | n;
-
-				$state.byte_push(b);
-			
-				$state.assignments[0x01] = false;
-				$state.assignments[0x02] = false;
-
-
-
-			},
-			None => panic!(),
-		}
-	}
-}
-
-macro_rules! draw {
-	($state:expr, $name:expr, $x:expr, $y:expr, $rows:expr) => {
-
-
-		$state.assignments[0x01] = true;
-		$state.assignments[0x02] = true;
-
-		
-		println!("draw font charater {:#x} at x {:#x}, y {:#x}, rows {:#x}", $name, $x, $y, $rows);
-
-		// 6XNN
-		// FX29
-		let nn = $name as u8;
-		let x = 0x01;		
-
-		let mut b: u8 = 0x06 << 4;
-		b = b | x;
-
-		$state.byte_push(b);
-
-		b = nn;
-
-		$state.byte_push(b);
-
-		b = 0x0F << 4;
-		b = b | x;
-
-		$state.byte_push(b);
-
-		b = 0x29;
-
-		$state.byte_push(b);
-
-		// 6XNN
-		let x = 0x01;
-		let nn = $x as u8;
-
-
-		b = 0x06 << 4;
-		b = b | x;
-
-		$state.byte_push(b);
-
-		b = nn;
-
-		$state.byte_push(b);
-
-		// 6XNN
-		let x = 0x02;
-		let nn = $y as u8;
-
-
-		b = 0x06 << 4;
-		b = b | x;
-
-		$state.byte_push(b);
-
-		b = nn;
-
-		$state.byte_push(b);
-
-
-		// DXYN
-		let x = 0x01;
-		let y = 0x02;
-		let n = $rows as u8;
-
-		b = 0x0D << 4;
-		b = b | x;
-
-		$state.byte_push(b);
-
-		b = y << 4;
-		b = b | n;
-
-		$state.byte_push(b);
-	
-		$state.assignments[0x01] = false;
-		$state.assignments[0x02] = false;
-
-	};
-}
-
-// proc macros
-
-fn new_symbol(state: &mut rewrite::State) {
-
-}
 
 
 
 const DB: bool = true;
-const DB_REGISTERS: bool = true;
 
 
 macro_rules! db {
@@ -717,8 +158,7 @@ impl Stack {
 
 
 // bits 0-63
-// 0 = most significant
-// 63 = least
+// 0 = most significant, 63 = least
 // if x > 63, panics
 
 fn check_bit_64(row: u64, x: u8) -> bool {
@@ -738,8 +178,7 @@ fn set_bit_64(row: &mut u64, x: u8, v: bool) {
 }
 
 // bits 0-7
-// 0 = most significant
-// 7 = least
+// 0 = most significant, 7 = least
 // if x > 7, panics
 
 fn check_bit_8(row: u8, x: u8) -> bool {
@@ -777,7 +216,7 @@ fn place(instruction: u16, wh: usize, chunk: &mut [u8; 4096]) {
 	let wh = wh as usize;
 
 	chunk[wh..wh+2].copy_from_slice(
-		&u16::to_be_bytes(instruction)
+			&u16::to_be_bytes(instruction)
 		);
 
 }
@@ -1218,50 +657,46 @@ fn main() {
 
 
 
-// 	rewrite::parse(r"
-// v0 i = 2
-// b = 77 
-
-// 		");
+	use rewrite::*;
 
 
+	let mut rw = State::new();
+
+	declare(&mut rw, None, "test");
+	if_start(&mut rw, None, "test");
+	loop_start(&mut rw, Valued::Literal(3), None);
+	if_end(&mut rw);
+
+	loop_end(&mut rw);
+
+	
+	// data(&mut rw, "test", &data!(0b00000001_u8));
 
 
-	let mut rw = rewrite::State::new();
-
-	rewrite::define(&mut rw, None, "zar");
-	rewrite::define(&mut rw, None, "gar");
-
-	rewrite::loop_start(&mut rw, 3, Some("beach"));
-
-	rewrite::increment(&mut rw, "zar");
-	rewrite::increment(&mut rw, "gar");
-
-	rewrite::loop_end(&mut rw);
+	// declare(&mut rw, None, "zar");
+	// declare(&mut rw, None, "gar");
 
 
-	rewrite::draw(&mut rw, 
-			rewrite::Valued::Literal(0xf), 
-			rewrite::Valued::Literal(10), 
-			rewrite::Valued::Literal(10), 
-			rewrite::Valued::Literal(4)
-		);
+	// loop_start(&mut rw, Valued::Literal(3), Some("beach"));
+
+	// 	draw(&mut rw, 
+	// 		Valued::Data(String::from("test")), 
+	// 		Valued::Symbol("zar".into()), 
+	// 		Valued::Symbol("gar".into()), 
+	// 		Valued::Literal(1)
+	// 		);
+	// 	increment(&mut rw, "zar");
+	// 	increment(&mut rw, "gar");
+
+	// loop_end(&mut rw);
+
 
 
 	rw.copy_program_to_memory(&mut chunk);
 
 
+	test_print_slice_as_u16(&chunk[pc..pc+22]);
 
-	// test_print_slice_as_u16(&chunk[pc..pc+22]);
-
-
-	// draw!(rw, 0xF, 5, 5, 5);
-	// data!(rw, 'b', ...)
-	// draw!(rw, 'b', 10, 10, 10);
-
-	// copy rw to program
-	// chunk[pc..0xFFF].copy_from_slice(&rw.program[0..rewrite::PROGRAM_LEN]);
-	// test_print_slice_as_u16(&chunk[pc..pc+24]);
 
 
 
