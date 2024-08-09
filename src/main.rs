@@ -321,22 +321,9 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 		0x7 => {
 			db!("add to register {:#x}, value {:#x}", x, nn);
 			
-			// nn is only a 1 byte number
-
 			let nn = nn.to_be_bytes()[1];
 
-			// panic stricken
-			// v[x] += nn;
-
-			// supposed to overflow?
-
-			// flag?
-
 			v[x] = v[x].wrapping_add(nn);
-
-			// if let Some(val) = v[x].checked_add(nn) {
-			// 	v[x] = val;
-			// }
 		}
 
 		0x8 => {
@@ -359,7 +346,6 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 				}
 				0x4 => {
-					// no
 					println!("set V{x:#x} += V{y:#x}");
 
 					match v[x].checked_add(v[y]) {
@@ -377,7 +363,6 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 					}   
 				}
 				0x5 => {
-					// no
 					println!("set V{x:#x} to V{x:#x} - V{y:#x}");
 					match v[x].checked_sub(v[y]) {
 						Some(val) => {
@@ -415,6 +400,9 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 						}
 						None => {
 							println!("integer underflow");
+
+							//
+							v[x] = v[y].wrapping_sub(v[x]);
 							v[0xF] = 0;
 						}
 					}
@@ -515,16 +503,6 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 		
 			match nn {
-				0x29 => {
-					print!("retreive font address of character V{:#x} {:#x} ... ", x, v[x]);
-
-					let address = 5 * (v[x] as usize);
-
-					print!("{:#x}\n", address);
-
-					*i = address;
-				}
-
 
 				0x0A => {
 					db!("wait for key...");
@@ -532,9 +510,8 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 					db!("got key");
 				}
 
-
 				0x07 => {
-					db!("set V{:#x} to value of timer, that being: {:#x}", x, t);
+					db!("set V{:#x} to value of timer,: {:#x}", x, t);
 
 					v[x] = *t;
 				}
@@ -548,6 +525,23 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 					*st = v[x];
 				}
+
+				0x1E => {
+					db!("index I plus equals V{:#x} {:#x}", x, v[x]);
+					
+					*i += (v[x] as usize);
+				}
+
+				0x29 => {
+					print!("retreive font address of character V{:#x} {:#x} ... ", x, v[x]);
+
+					let address = 5 * (v[x] as usize);
+
+					print!("{:#x}\n", address);
+
+					*i = address;
+				}
+
 				0x33 => {
 					println!("binary-coded decimal conversion");
 
@@ -565,23 +559,6 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 					chunk[(*i) + 2] = ones;
 				}
 				0x55 => {
-					println!("retreive memory to V0 - V{x:#x}");
-
-					let i = *i as usize;
-
-					for vi in 0..=x {
-						if i + vi >= chunk.len() {
-							println!("tried to retreive memory from a location past the end");
-
-							break;
-						}
-
-						v[vi] = chunk[i + vi];
-					}
-
-
-				}
-				0x65 => {
 					println!("store values registers V0 - V{x:#x} at index {i:#x}");
 
 					let i = *i as usize;
@@ -599,6 +576,22 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 						}
 
 						chunk[i + vi] = v[vi];
+					}
+				}
+
+				0x65 => {
+					println!("retreive memory to V0 - V{x:#x}");
+
+					let i = *i as usize;
+
+					for vi in 0..=x {
+						if i + vi >= chunk.len() {
+							println!("tried to retreive memory from a location past the end");
+
+							break;
+						}
+
+						v[vi] = chunk[i + vi];
 					}
 				}
 				_ => {}
@@ -646,7 +639,7 @@ fn main() {
 
 	// execution rate
 
-	let e_rate = Duration::from_secs(1);
+	let e_rate = Duration::from_secs(1 / 60);
 	let mut start = SystemTime::now();
 
 	let t_rate = Duration::from_secs(1 / 60);
@@ -657,45 +650,9 @@ fn main() {
 
 
 
-	use rewrite::*;
 
 
-	let mut rw = State::new();
-
-	declare(&mut rw, None, "test");
-	if_start(&mut rw, None, "test");
-	loop_start(&mut rw, Valued::Literal(3), None);
-	if_end(&mut rw);
-
-	loop_end(&mut rw);
-
-	
-	// data(&mut rw, "test", &data!(0b00000001_u8));
-
-
-	// declare(&mut rw, None, "zar");
-	// declare(&mut rw, None, "gar");
-
-
-	// loop_start(&mut rw, Valued::Literal(3), Some("beach"));
-
-	// 	draw(&mut rw, 
-	// 		Valued::Data(String::from("test")), 
-	// 		Valued::Symbol("zar".into()), 
-	// 		Valued::Symbol("gar".into()), 
-	// 		Valued::Literal(1)
-	// 		);
-	// 	increment(&mut rw, "zar");
-	// 	increment(&mut rw, "gar");
-
-	// loop_end(&mut rw);
-
-
-
-	rw.copy_program_to_memory(&mut chunk);
-
-
-	test_print_slice_as_u16(&chunk[pc..pc+22]);
+	// test_print_slice_as_u16(&chunk[pc..pc+22]);
 
 
 
@@ -741,7 +698,7 @@ fn main() {
 				}
 
 				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack, &mut timer, &mut sound_timer);
-				// test_draw_display(&display);
+				test_draw_display(&display);
 				test_print_registers(&v0vf);
 
 			}
