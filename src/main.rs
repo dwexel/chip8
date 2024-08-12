@@ -48,7 +48,7 @@
 
 
 
-#![feature(macro_metavar_expr)]
+// #![feature(macro_metavar_expr)]
 
 #![allow(unused)]
 
@@ -61,12 +61,12 @@ use rand;
 mod rewrite;
 
 
-macro_rules! data {
-	($($e:expr)*) => {{
-		let data: [ u8; ${count($e)} ] = [ $( $e, )* ];
-		data
-	}};
-}
+// macro_rules! data {
+// 	($($e:expr)*) => {{
+// 		let data: [ u8; ${count($e)} ] = [ $( $e, )* ];
+// 		data
+// 	}};
+// }
 
 
 
@@ -151,6 +151,7 @@ impl Stack {
 	}
 	
 	fn pop(&mut self) -> usize {
+		// panic here ... pop empty stack ya
 		self.pointer -= 1;
 		self.stack[self.pointer]
 	}
@@ -212,25 +213,26 @@ fn from_bit_array(bits: &[bool]) -> u8 {
 
 // insert an instruction into the chunk
 
-fn place(instruction: u16, wh: usize, chunk: &mut [u8; 4096]) {
-	let wh = wh as usize;
+// fn place(instruction: u16, pc: &mut usize, chunk: &mut [u8; 4096]) {
+// 	// let wh = wh as usize;
 
-	chunk[wh..wh+2].copy_from_slice(
-			&u16::to_be_bytes(instruction)
-		);
+// 	chunk[(*pc)..(*pc)+2].copy_from_slice(
+// 		&u16::to_be_bytes(instruction)
+// 	);
 
-}
+// 	// *pc += 2;
+// }
+
+
+
 
 // the PC is at a location
 // load two bytes from there, then increment PC by two bytes
 
 fn fetch(pc: &mut usize, chunk: &[u8; 4096]) -> u16 {
-	// let _pc = *pc as usize;
-	// let pc = *pc;
-
 	let instruction = u16::from_be_bytes(
 		[chunk[*pc], chunk[*pc+1]]
-		);
+	);
 
 	*pc += 2;
 
@@ -293,6 +295,9 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 		},
 		0x4 => {
 			print!("skip? ");
+			print!("V{:#x} {:#x} not equal ", x, v[x]);
+			print!("{:#x} ", nn);
+
 
 			if (v[x] as u16) != nn {
 				print!("yes\n");
@@ -306,6 +311,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 			if v[x] == v[y] {
 				print!("yes\n");
+				*pc += 2;
 			} else {
 				print!("no\n");
 			}
@@ -337,8 +343,10 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 					v[x] = v[x] | v[y];
 				}
 				0x2 => {
-					println!("bitwise AND");
+					println!("bitwise AND V{:#x} {:#x} &= V{:#x} {:#x}", x, v[x], y, v[y]);
 					v[x] = v[x] & v[y];
+
+					// print!(" ({:#x})\n", v[x]);
 				}
 				0x3 => {
 					println!("bitwise XOR");
@@ -346,7 +354,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 				}
 				0x4 => {
-					println!("set V{x:#x} += V{y:#x}");
+					println!("V{x:#x} += V{y:#x}");
 
 					match v[x].checked_add(v[y]) {
 						Some(val) => {
@@ -429,6 +437,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 			if v[x] != v[y] {
 				print!("yes\n");
+				*pc += 2;
 			} else {
 				print!("no\n");
 			}
@@ -598,7 +607,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 			}
 		}
 
-		_ => panic!()
+		_ => panic!("{:#x}", instruction)
 	}
 }
 
@@ -630,6 +639,8 @@ fn main() {
 	// in reality, is a 16 bit number
 	let mut pc: usize = 0x200;
 
+
+
 	let mut stack = Stack::new();
 	let mut display: [u64; 32] = [0; 32];
 
@@ -638,7 +649,6 @@ fn main() {
 	let mut v0vf: [u8; 16] = [0; 16];
 
 	// execution rate
-
 	let e_rate = Duration::from_secs(1 / 60);
 	let mut start = SystemTime::now();
 
@@ -649,11 +659,37 @@ fn main() {
 	let mut sound_timer: u8 = 0;
 
 
+	use rewrite::*;
+
+
+	let mut state = State::new();
+	
+	shift_machine(&mut state);
+	// multiply(&mut state);
+
+	// place(&mut state, 0x6111);
+	multiply_v(&mut state);
+
+	state.copy_program_to_memory(&mut chunk);
 
 
 
-	// test_print_slice_as_u16(&chunk[pc..pc+22]);
+	// 5 (101) * 5 (101)
+	// += 5 << 0
+	// += 0 << 1
+	// += 5 << 2
 
+
+	// 4 (100) * 5 (101)
+
+	// 0
+	// += 4 << 0
+	// += 0 << 1
+	// += 4 << 2
+
+
+
+	test_print_slice_as_u16(&chunk[pc..pc+60]);
 
 
 
@@ -665,7 +701,6 @@ fn main() {
 	}
 
 	loop {
-
 		match t_start.elapsed() {
 			Ok(elapsed) if elapsed > t_rate => {
 				t_start = SystemTime::now();
@@ -698,7 +733,7 @@ fn main() {
 				}
 
 				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack, &mut timer, &mut sound_timer);
-				test_draw_display(&display);
+				// test_draw_display(&display);
 				test_print_registers(&v0vf);
 
 			}
