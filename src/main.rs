@@ -54,7 +54,6 @@
 
 
 use std::{env, fs::File, io::{self, Read}, process::exit, time::{Duration, SystemTime}};
-use rand;
 
 
 
@@ -546,7 +545,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 					let address = 5 * (v[x] as usize);
 
-					print!("{:#x}\n", address);
+					println!("{:#x}", address);
 
 					*i = address;
 				}
@@ -570,7 +569,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 				0x55 => {
 					println!("store values registers V0 - V{x:#x} at index {i:#x}");
 
-					let i = *i as usize;
+					let i = *i;
 
 					// for each register 
 					// starting at 0
@@ -591,7 +590,8 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 				0x65 => {
 					println!("retreive memory to V0 - V{x:#x}");
 
-					let i = *i as usize;
+					// let i = *i as usize;
+					let i = *i;
 
 					for vi in 0..=x {
 						if i + vi >= chunk.len() {
@@ -663,12 +663,20 @@ fn main() {
 
 
 	let mut state = State::new();
+
 	
-	shift_machine(&mut state);
+	assign(&mut state, Valued::from("m1"), Valued::Literal(5));
+	assign(&mut state, Valued::from("m2"), Valued::Literal(5));	
+	operate(&mut state, Valued::from("m1"), Ops::Multiply, Valued::from("m2"));
+
+
+
+	
+	// shift_machine(&mut state);
 	// multiply(&mut state);
 
 	// place(&mut state, 0x6111);
-	multiply_v(&mut state);
+	// multiply_v(&mut state);
 
 	state.copy_program_to_memory(&mut chunk);
 
@@ -697,7 +705,10 @@ fn main() {
 		println!("The filename argument is {}", fname);
 
 		let mut f = File::open(fname).expect("bad filename");
-		f.read(&mut chunk[pc..0xFFF]).expect("ughhhhghghg");
+
+		if let Ok(l) = f.read(&mut chunk[pc..0xFFF]) {
+
+		}
 	}
 
 	loop {
