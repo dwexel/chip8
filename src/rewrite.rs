@@ -19,7 +19,7 @@ impl From<&str> for Assignment {
 
 enum Section {
 	If(u16),
-	Loop(u16)
+	Loop(u16, Valued)
 }
 
 
@@ -167,7 +167,7 @@ pub enum Valued {
 	Literal(u8),
 	Symbol(String),
 	Data(String),
-
+	// internal use
 	Register(u8),
 }
 
@@ -184,10 +184,18 @@ impl From<u8> for Valued {
 }
 
 
-pub fn if_start(state: &mut State, condition: Option<u8>, name: &str) {
+pub fn if_start(state: &mut State, condition: Option<u8>, variable: Valued) {
 	let mut b: u8;
 
-	let x = state.get(name);
+	// let x = state.get(name);
+	let x = match variable {
+	    Valued::Symbol(ref name) => state.get(name),
+	    Valued::Register(x) => x,
+
+	    Valued::Literal(_) => todo!(),
+	    Valued::Data(_) => todo!(),
+	};
+
 
 	let nn = match condition {
 	    Some(nn) => {
@@ -253,75 +261,103 @@ pub fn loop_start(state: &mut State, count: Valued, name: Option<&str>) {
 
 	let mut b: u8;
 	
-	let mut nn = 0x00;
 
-	// hm
 	// 6XNN
+	let nn = 0x00;
 	b = 0x6 << 4; b = b | x; state.byte_push(b);
 	b = nn; state.byte_push(b);
 
-	state.send_forward.push(Section::Loop(state.pcc));
 
-	match count {
-	    Valued::Literal(nn) => {
+	state.send_forward.push(Section::Loop(state.pcc, count));
 
-			// 4XNN
-			b = 0x4 << 4; b = b | x; state.byte_push(b);
-			b = nn; state.byte_push(b);	    	
-	    }
-	    Valued::Symbol(ref name) => {
-	    	let y = state.get(name);
 
-			// 9XY0
-			b = 0x9 << 4; b |= x; state.byte_push(b);
-			b = y << 4; b |= 0x0; state.byte_push(b);
+	// match count {
+	//     Valued::Literal(nn) => {
 
-	    }
-	    Valued::Data(_) => panic!(),
-	    Valued::Register(_) => panic!(),
-	}
+	// 		// 4XNN
+	// 		b = 0x4 << 4; b = b | x; state.byte_push(b);
+	// 		b = nn; state.byte_push(b);	    	
+	//     }
+	//     Valued::Symbol(ref name) => {
+	//     	let y = state.get(name);
+
+	// 		// 9XY0
+	// 		b = 0x9 << 4; b |= x; state.byte_push(b);
+	// 		b = y << 4; b |= 0x0; state.byte_push(b);
+
+	//     }
+	//     Valued::Data(_) => panic!(),
+	//     Valued::Register(_) => panic!(),
+	// }
 	
+
+
 	// >> 1NNN
-	state.pcc += 2;
-
-	
-	// // 7XNN
-	// let nn = 1;
-	// b = 0x7 << 4; b |= x; state.byte_push(b);
-	// b = nn; state.byte_push(b);
+	// state.pcc += 2;
 }
 
 pub fn loop_end(state: &mut State) {
 	let s = state.send_forward.pop().expect("e");
 
-	if let Section::Loop(jump_back_addr) = s {
+	if let Section::Loop(jump_back_addr, count) = s {
+
+
 		let mut b: u8;
 
 		// 7XNN
-		let nn = 1;
 		let loop_reg = state.non_user_stack.pop().expect("same error as above gr");
-		b = 0x7 << 4; b |= loop_reg; state.byte_push(b);
+		let nn = 1;
+		let x = loop_reg;
+		b = 0x7 << 4; b |= x; state.byte_push(b);
 		b = nn; state.byte_push(b);
 
 
-		let nnn = jump_back_addr.to_be_bytes();
+		// test
+		match count {
+		    Valued::Literal(nn) => {
+				let x = loop_reg;
+
+				// 4XNN
+				b = 0x4 << 4; b = b | x; state.byte_push(b);
+				b = nn; state.byte_push(b);	    	
+		    }
+		    Valued::Symbol(ref name) => {
+		    	let y = state.get(name);
+		    	let x = loop_reg;
+
+				// 9XY0
+				b = 0x9 << 4; b |= x; state.byte_push(b);
+				b = y << 4; b |= 0x0; state.byte_push(b);
+
+		    }
+		    _ => todo!()
+		    // Valued::Data(_) => panic!(),
+		    // Valued::Register(_) => panic!(),
+		}
 		
+		
+
 		// 1NNN
+		let nnn = jump_back_addr.to_be_bytes();
 		b = 0x1 << 4; b |= nnn[0]; state.byte_push(b);
 		b = nnn[1]; state.byte_push(b);
 
-		let nnn = state.pcc.to_be_bytes();
-		let copy_to_addr = jump_back_addr as usize + 2;
-
-		// todo could use .memcpy
-		// << 1NNN
-		b = 0x1 << 4; b |= nnn[0]; state.program[copy_to_addr] = b;
-		b = nnn[1]; state.program[copy_to_addr + 1] = b;
 
 
-		// if loop_reg != 16 {
-			state.dissasign(loop_reg);
-		// }
+
+		// // << 1NNN
+		// let nnn = state.pcc.to_be_bytes();
+		// let copy_to_addr = jump_back_addr as usize + 2;
+		// b = 0x1 << 4; b |= nnn[0]; state.program[copy_to_addr] = b;
+		// b = nnn[1]; state.program[copy_to_addr + 1] = b;
+
+
+
+
+		state.dissasign(loop_reg);
+
+
+
 	} else {
 		panic!("syntax error");
 	}
@@ -332,6 +368,8 @@ pub fn loop_end(state: &mut State) {
 pub enum Ops {
     Add,
     Subtract,
+    Multiply,
+
     Shl,
     Shr,
     BitAnd,
@@ -345,7 +383,8 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	let mut b: u8;
 
 	// let x = state.get(name);
-	let x = match variable {
+	// let x = match variable {
+	let v_var = match variable {
 	    Valued::Symbol(ref name) => state.get(name),
 	    Valued::Register(x) => x,
 	    _ => todo!(),
@@ -355,6 +394,7 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	    Ops::Add => {
 	    	match operand {
 				Valued::Literal(value) => {
+					let x = v_var;
 					let nn = value;
 
 					// 7XNN
@@ -362,6 +402,7 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 					b = nn; state.byte_push(b);
 				},
 				Valued::Symbol(oname) => {
+					let x = v_var;
 					let y = state.get(&oname);
 					
 					// 8XY4
@@ -371,6 +412,7 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 				Valued::Data(_) => todo!(),
 		
 			    Valued::Register(y) => {
+			    	let x = v_var;
 
 					// 8XY4
 					b = 0x8 << 4; b |= x; state.byte_push(b);
@@ -382,6 +424,7 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	    Ops::Subtract => {
 	    	match operand {
 	    		Valued::Symbol(oname) => {
+	    			let x = v_var;
 	    			let y = state.get(&oname);
 
 	    			// 8XY5
@@ -391,9 +434,132 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	    		_ => todo!()
 	    	}
 	    }
+	    Ops::Multiply => {
+
+	    	let v_dest = state.find_register(Assignment::Anonymous);
+
+
+	    	match operand {
+	    		Valued::Symbol(name) => {
+	    			// make sure v_dest is clear
+
+	    			let v_by = state.get(&name);
+					let v_shift = state.find_register(Assignment::Anonymous);
+					let v_test = state.find_register(Assignment::Anonymous);
+
+					// set
+					// 6XNN
+					let x = v_shift;
+					let nn = 0x1;
+			    	b = 0x6 << 4; b |= v_shift; state.byte_push(b);
+			    	b = nn; state.byte_push(b);
+
+			    	// test then shift
+
+			    	loop_start(state, Valued::Literal(8), None);
+
+				    	// move
+				    	// 8XY0
+				    	let x = v_test;
+				    	let y = v_by;
+		    			b = 0x8 << 4; b |= x; state.byte_push(b);
+		    			b = y << 4; b |= 0x0; state.byte_push(b);
+
+
+		    			// AND
+		    			// 8XY2
+		    			let x = v_test;
+		    			let y = v_shift;
+		    			b = 0x8 << 4; b |= x; state.byte_push(b);
+		    			b = y << 4; b |= 0x2; state.byte_push(b);
+
+		    			// test ya
+				    	if_start(state, None, Valued::Register(v_test));
+
+				    		// draw(state, Valued::Literal(1), Valued::Literal(2), Valued::Literal(2), Valued::Literal(5));
+
+				    		// 
+				    		// 8XY4
+				    		let x = v_dest;
+				    		let y = v_var;
+			    			b = 0x8 << 4; b |= x; state.byte_push(b);
+			    			b = y << 4; b |= 0x4; state.byte_push(b);
+
+
+				    	if_end(state);
+			
+				    	// 8XYE
+			    		// shift
+			    		let x = v_shift;
+						b = 0x8 << 4; b |= x; state.byte_push(b);
+						b = 0x0 << 4; b |= 0xE; state.byte_push(b);
+
+						// 8XYE
+						// shift
+						let x = v_var;
+						b = 0x8 << 4; b |= x; state.byte_push(b);
+						b = 0x0 << 4; b |= 0xE; state.byte_push(b);
+
+
+			    	
+			    	loop_end(state);
+
+
+
+			    	state.dissasign(v_by);
+			    	state.dissasign(v_shift);
+			    	state.dissasign(v_test);
+
+	    		}
+	    		Valued::Literal(by) => {
+	    			// make sure v_dest is clear
+
+					for i in 0..num_bits(by) {
+						if (by & (1 << i) != 0) {
+
+							// add 
+					    	// 8XY4
+					    	let x = v_dest;
+					    	let y = v_var;
+			    			b = 0x8 << 4; b |= x; state.byte_push(b);
+			    			b = y << 4; b |= 0x4; state.byte_push(b);
+
+						} 
+
+						// 8XYE
+						// shift
+						let x = v_var;
+						b = 0x8 << 4; b |= x; state.byte_push(b);
+						b = 0x0 << 4; b |= 0xE; state.byte_push(b);
+					}
+
+	    		}
+
+	    		_ => todo!()
+	    	}
+
+			
+			// move
+	    	// 8XY0
+	    	let x = v_var;
+	    	let y = v_dest;
+			b = 0x8 << 4; b |= x; state.byte_push(b);
+			b = y << 4; b |= 0x0; state.byte_push(b);
+
+
+
+			state.dissasign(v_dest);
+
+
+	    }
+
+
 	    Ops::Shl => {
 	    	match operand {
 	    	    Valued::Symbol(ref oname) => {
+
+/*
+// oh god
 
 	    	    	// shift operator
 	    	    	let _x = state.get("_so");
@@ -414,7 +580,7 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 
 	    	    	// sv = shift value (register)
 	    	    	let _x = state.get("_sv");
-	    	    	let y = x;
+	    	    	let y = v_var;
 
 	    	    	// move in the operated
 	    	    	// 8XY0
@@ -429,10 +595,15 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	    	    	// 8XY0
 	    	    	b = 0x8 << 4; b |= y; state.byte_push(b);
 	    	    	b = _x << 4; b |= 0x0; state.byte_push(b);
+*/
 	    	    }
+
+		
 
 	    	    Valued::Literal(value) => {
 	    	    	if value > 0 {
+	    	    		let x = v_var;
+
 	    	    		if value > 7 {
 	    	    			panic!();
 	    	    		}
@@ -463,6 +634,7 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	    	match operand {
 	    	    Valued::Literal(value) => { todo!(); }
 	    	    Valued::Symbol(name) => {
+	    	    	let x = v_var;
 	    	    	let y = state.get(&name);
 
 	    			// 8XY2
@@ -593,6 +765,7 @@ pub fn draw(state: &mut State, data: Valued, xval: Valued, yval: Valued, rows: V
 // todo option to give a value
 // hm 
 // don't return
+
 pub fn declare(state: &mut State, register: Option<u8>, name: &str) -> u8 {
 	let _x = match register {
 		Some(_x) => todo!(),
@@ -605,6 +778,8 @@ pub fn declare(state: &mut State, register: Option<u8>, name: &str) -> u8 {
 	_x
 }
 
+
+// todo create if doesn't exist
 pub fn assign(state: &mut State, variable: Valued, value: Valued) {
 	let mut b: u8;
 	
@@ -662,57 +837,59 @@ pub fn gap(state: &mut State) {
 
 
 
-pub fn shift_machine(state: &mut State) {
-	let mut b: u8;
+// pub fn shift_machine(state: &mut State) {
+// 	let mut b: u8;
 
-	let x = state.find_register(Assignment::from("_sv"));
-	let _y = state.find_register(Assignment::from("_so"));
+// 	let x = state.find_register(Assignment::from("_sv"));
+// 	let _y = state.find_register(Assignment::from("_so"));
 
-	// >> 1NNN
-	let jump_past = state.pcc as usize;
-	state.pcc += 2;
+// 	// >> 1NNN
+// 	let jump_past = state.pcc as usize;
+// 	state.pcc += 2;
 
-	state.shift_machine = Some(state.pcc);
+// 	state.shift_machine = Some(state.pcc);
 
-	let _x = state.find_register(Assignment::Anonymous);
-	let nn = 0x00;
+// 	let _x = state.find_register(Assignment::Anonymous);
+// 	let nn = 0x00;
 
-	// 6XNN
-	b = 0x6 << 4; b |= _x; state.byte_push(b);
-	b = nn; state.byte_push(b);
+// 	// 6XNN
+// 	b = 0x6 << 4; b |= _x; state.byte_push(b);
+// 	b = nn; state.byte_push(b);
 
-	//
-	let jump_back_addr = state.pcc.to_be_bytes();
+// 	//
+// 	let jump_back_addr = state.pcc.to_be_bytes();
 
-	// 9XY0
-	// test x != y
-	b = 0x9 << 4; b |= _x; state.byte_push(b);
-	b = _y << 4; b |= 0x0; state.byte_push(b);
+// 	// 9XY0
+// 	// test x != y
+// 	b = 0x9 << 4; b |= _x; state.byte_push(b);
+// 	b = _y << 4; b |= 0x0; state.byte_push(b);
 
-	// 00EE
-	b = 0x00; state.byte_push(b);
-	b = 0xEE; state.byte_push(b);
+// 	// 00EE
+// 	b = 0x00; state.byte_push(b);
+// 	b = 0xEE; state.byte_push(b);
 	
-	// 7XNN
-	let nn = 1;
-	b = 0x7 << 4; b |= _x; state.byte_push(b);
-	b = nn; state.byte_push(b);
+// 	// 7XNN
+// 	let nn = 1;
+// 	b = 0x7 << 4; b |= _x; state.byte_push(b);
+// 	b = nn; state.byte_push(b);
 
-	// bit chift
-	// ya y register huh
-	b = 0x8 << 4; b |= x; state.byte_push(b);
-	b = 0x0 << 4; b |= 0xE; state.byte_push(b);
+// 	// bit chift
+// 	// ya y register huh
+// 	b = 0x8 << 4; b |= x; state.byte_push(b);
+// 	b = 0x0 << 4; b |= 0xE; state.byte_push(b);
 
-	// 1NNN
-	let nnn = jump_back_addr;
-	b = 0x1 << 4; b |= nnn[0]; state.byte_push(b);
-	b = nnn[1]; state.byte_push(b);
+// 	// 1NNN
+// 	let nnn = jump_back_addr;
+// 	b = 0x1 << 4; b |= nnn[0]; state.byte_push(b);
+// 	b = nnn[1]; state.byte_push(b);
 
-	// << 1NNN
-	let nnn = state.pcc.to_be_bytes();
-	b = 0x1 << 4; b |= nnn[0]; state.program[jump_past] = b;
-	b = nnn[1]; state.program[jump_past + 1] = b;
-}
+// 	// << 1NNN
+// 	let nnn = state.pcc.to_be_bytes();
+// 	b = 0x1 << 4; b |= nnn[0]; state.program[jump_past] = b;
+// 	b = nnn[1]; state.program[jump_past + 1] = b;
+// }
+
+
 
 
 
@@ -732,119 +909,6 @@ fn num_bits(b: u8) -> u8 {
 }
 
 
-
-// it should syntax error if you don't close loop before program ends
-
-pub fn multiply(state: &mut State) {
-	let m1 = state.find_register(Assignment::Anonymous); assign(state, Valued::Register(m1), Valued::Literal(21));
-	let by = Valued::Literal(3);
-
-	let dest = state.find_register(Assignment::Anonymous);
-
-	// toodoo
-	match by {
-		Valued::Literal(by) => {
-
-			for i in 0..num_bits(by) {
-				if (by & (1 << i) != 0) {
-					// if 0 < i {
-					// 	operate(state, Valued::Register(m1), Ops::Shl, Valued::Literal(1));
-					// }
-
-					operate(state, Valued::Register(dest), Ops::Add, Valued::Register(m1));
-					operate(state, Valued::Register(m1), Ops::Shl, Valued::Literal(1));
-
-				} else {
-					println!("no");
-				}
-			}
-
-
-
-		}
-		_ => todo!()
-	}
-
-	state.dissasign(m1);
-	state.dissasign(dest);
-
-
-}
-
-pub fn multiply_v(state: &mut State) {
-	// let m1 = state.find_register(Assignment::Anonymous); assign(state, Valued::Register(m1), Valued::Literal(21));
-	// let m2 = state.find_register(Assignment::Anonymous); assign(state, Valued::Register(m2), Valued::Literal(3));
-
-
-
-
-	state.find_register(Assignment::from("m1"));
-	assign(state, Valued::from("m1"), Valued::Literal(3));
-
-	state.find_register(Assignment::from("m2"));
-	assign(state, Valued::from("m2"), Valued::Literal(21));
-
-
-	state.find_register(Assignment::from("dest"));
-
-
-
-	let mut b: u8;
-
-
-
-
-	loop_start(state, Valued::Literal(8), Some("i"));
-
-
-    	assign(state, Valued::from("_so"), Valued::from("i"));
-
-
-    	// sv = shift value (register)
-    	// 6XNN
-    	let _x = state.get("_sv");
-    	let nn = 0x1;
-    	b = 0x6 << 4; b |= _x; state.byte_push(b);
-    	b = nn; state.byte_push(b);
-
-
-    	// 2NNN
-    	let nnn = state.shift_machine.expect("mistake you did boy").to_be_bytes();
-    	b = 0x2 << 4; b |= nnn[0]; state.byte_push(b);
-    	b = nnn[1]; state.byte_push(b);
-
-
-    	// bit and
-    	// m1 and reg result
-    	operate(state, Valued::from("_sv"), Ops::BitAnd, Valued::from("m1"));
-
-
-
-		// if_start(state, Some(4), "_sv");
-		if_start(state, None, "_sv");
-
-			// add m2 to dest
-			operate(state, Valued::from("dest"), Ops::Add, Valued::from("m2"));
-
-
-
-			// draw(state, Valued::Literal(1), Valued::Literal(1), Valued::Literal(1), Valued::Literal(5));
-
-		if_end(state);
-
-
-		// then shift m2 left
-
-		// 8XYE
-		let x = state.get("m2");
-		b = 0x8 << 4; b |= x; state.byte_push(b);
-		b = 0x0 << 4; b |= 0xE; state.byte_push(b);
-
-
-
-
-	loop_end(state);
-}
 
 
 

@@ -664,7 +664,7 @@ fn main() {
 
 	let mut state = State::new();
 	
-	shift_machine(&mut state);
+	// shift_machine(&mut state);
 	// multiply(&mut state);
 
 	// place(&mut state, 0x6111);
