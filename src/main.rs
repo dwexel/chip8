@@ -388,15 +388,18 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 				0x6 => {
 					println!("bit shift V:{x:#x} right 1");
 
-					if v[x] & 0b00000001 == 0b00000001 {
+					let f = if v[x] & 0b00000001 == 0b00000001 {
 						print!("bit 1 was shifted out");
-						v[0xF] = 1;
+						// v[0xF] = 1;
+						1
 					} else {
 						print!("bit 0 was shifted out");
-						v[0xF] = 0;
-					}
+						// v[0xF] = 0;
+						0
+					};
 
 					v[x] >>= 1;
+					v[0xF] = f;
 				}
 				0x7 => {
 					println!("set V{x:#x} to V{y:#x} - V{x:#x}");
@@ -417,15 +420,20 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 				}
 				0xE => {
 					print!("bit shift V:{x:#x} left 1 ...");
-					if v[x] & 0b10000000 == 0b10000000 {
+
+					let f = if v[x] & 0b10000000 == 0b10000000 {
 						print!("bit 1 was shifted out");
-						v[0xF] = 1;
+						// v[0xF] = 1;
+						1
 					} else {
 						print!("bit 0 was shifted out");
-						v[0xF] = 0;
-					}
+						// v[0xF] = 0;
+						0
+					};
 
 					v[x] <<= 1;
+					v[0xF] = f;
+
 				}
 				_ => {},
 			}
@@ -589,17 +597,12 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 				0x65 => {
 					println!("retreive memory to V0 - V{x:#x}");
-
-					// let i = *i as usize;
 					let i = *i;
-
 					for vi in 0..=x {
 						if i + vi >= chunk.len() {
 							println!("tried to retreive memory from a location past the end");
-
 							break;
 						}
-
 						v[vi] = chunk[i + vi];
 					}
 				}
@@ -649,7 +652,7 @@ fn main() {
 	let mut v0vf: [u8; 16] = [0; 16];
 
 	// execution rate
-	let e_rate = Duration::from_secs(1 / 60);
+	let e_rate = Duration::from_secs(1 / 700);
 	let mut start = SystemTime::now();
 
 	let t_rate = Duration::from_secs(1 / 60);
@@ -664,40 +667,23 @@ fn main() {
 
 	let mut state = State::new();
 
+	data(&mut state, "g", &[0x1, 0x2]);
 	
 	assign(&mut state, Valued::from("m1"), Valued::Literal(5));
 	assign(&mut state, Valued::from("m2"), Valued::Literal(5));	
 	operate(&mut state, Valued::from("m1"), Ops::Multiply, Valued::from("m2"));
 
-
-
-	
-	// shift_machine(&mut state);
-	// multiply(&mut state);
-
-	// place(&mut state, 0x6111);
-	// multiply_v(&mut state);
+	draw(&mut state, Valued::from(0xA), Valued::from("m1"), Valued::from("m2"), Valued::from(5));
+	draw(&mut state, Valued::Data(String::from("g")), Valued::from("m2"), Valued::from("m1"), Valued::from(5));
 
 	state.copy_program_to_memory(&mut chunk);
 
 
-
-	// 5 (101) * 5 (101)
-	// += 5 << 0
-	// += 0 << 1
-	// += 5 << 2
-
-
-	// 4 (100) * 5 (101)
-
-	// 0
-	// += 4 << 0
-	// += 0 << 1
-	// += 4 << 2
-
-
-
 	test_print_slice_as_u16(&chunk[pc..pc+60]);
+
+
+	// 8XY6
+	// 8XYE
 
 
 
@@ -705,7 +691,6 @@ fn main() {
 		println!("The filename argument is {}", fname);
 
 		let mut f = File::open(fname).expect("bad filename");
-
 		if let Ok(l) = f.read(&mut chunk[pc..0xFFF]) {
 
 		}
