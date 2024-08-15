@@ -667,17 +667,25 @@ fn main() {
 
 	let mut state = State::new();
 
-	data(&mut state, "g", &[0x1, 0x2]);
-	
+	data(&mut state, "g", &[0b11110011, 0b11110011, 0b11110011, 0b11000011, 0b11000011, 0b11000011, 0b11000011, 0b11000011]);
+
+	data_flipped(&mut state, "gg", Valued::Data("g".into()), Flip(true, true));
+
+
+
 	assign(&mut state, Valued::from("m1"), Valued::Literal(5));
 	assign(&mut state, Valued::from("m2"), Valued::Literal(5));	
 	operate(&mut state, Valued::from("m1"), Ops::Multiply, Valued::from("m2"));
 
-	draw(&mut state, Valued::from(0xA), Valued::from("m1"), Valued::from("m2"), Valued::from(5));
-	draw(&mut state, Valued::Data(String::from("g")), Valued::from("m2"), Valued::from("m1"), Valued::from(5));
+	// draw(&mut state, Valued::from(0xA), Valued::from("m1"), Valued::from("m2"), Valued::from(5));
+
+	draw(&mut state, Valued::Data(String::from("g")), Valued::from("m2"), Valued::from("m1"), Valued::from(8));
+	draw(&mut state, Valued::Data(String::from("gg")), Valued::from(20), Valued::from(20), Valued::from(8));
 
 	state.copy_program_to_memory(&mut chunk);
 
+
+	// if_keydown
 
 	test_print_slice_as_u16(&chunk[pc..pc+60]);
 
@@ -729,7 +737,7 @@ fn main() {
 				}
 
 				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack, &mut timer, &mut sound_timer);
-				// test_draw_display(&display);
+				test_draw_display(&display);
 				test_print_registers(&v0vf);
 
 			}

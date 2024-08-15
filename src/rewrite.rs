@@ -4,45 +4,6 @@ use std::{collections::HashMap, ops::Index};
 
 use crate::{test_print_slice, test_print_slice_as_u16};
 
-#[derive(Debug)]
-enum Assignment {
-	None,
-	Anonymous,
-	Nonymous(String)  
-}
-
-impl From<&str> for Assignment {
-    fn from(value: &str) -> Self {
-        Assignment::Nonymous(String::from(value))
-    }
-}
-
-enum Section {
-	If(u16),
-	Loop(u16, Valued)
-}
-
-
-const PROGRAM_START: u16 = 0x200;
-const PROGRAM_LEN: u16 = 0xFFF - PROGRAM_START; 
-const DATA_SECTION: u16 = 0x200 + (PROGRAM_LEN / 2);
-
-
-
-
-pub struct State {
-	assignments: [Assignment; 16],
-	datas: HashMap<String, (u16, u8)>,
-	program: [u8; 4096],
-	pcc: u16,
-	dpcc: u16,
-	// send_forward: Vec<u16>,
-	send_forward: Vec<Section>,
-	non_user_stack: Vec<u8>,
-	// send_forward_if: Vec<u16>,
-	shift_machine: Option<u16>,
-}
-
 
 macro_rules! instruction {
 	($state:ident, $o:expr) => {};
@@ -82,15 +43,60 @@ macro_rules! instruction {
 
 
 
+#[derive(Debug)]
+enum Assignment {
+	None,
+	Anonymous,
+	Nonymous(String)  
+}
+
+impl From<&str> for Assignment {
+    fn from(value: &str) -> Self {
+        Assignment::Nonymous(String::from(value))
+    }
+}
+
+enum Section {
+	If(u16),
+	Loop(u16, Valued)
+}
+
+
+
+const PROGRAM_START: u16 = 0x200;
+// PROGRAM_END = 0xFFF
+const PROGRAM_LEN: u16 = 0xFFF - PROGRAM_START; 
+const DATA_SECTION: u16 = 0x200 + (PROGRAM_LEN / 2);
+
+
+
+
+pub struct State {
+	assignments: [Assignment; 16],
+	datas: HashMap<String, (u16, u16)>,
+	program: [u8; 4096],
+	pcc: u16,
+	pcd: u16,
+	// dpcc: u16,
+	// send_forward: Vec<u16>,
+	send_forward: Vec<Section>,
+	non_user_stack: Vec<u8>,
+	// send_forward_if: Vec<u16>,
+	shift_machine: Option<u16>,
+}
+
+
+
 impl State {
 	pub fn new() -> Self {
 		Self {
 			assignments: [Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::None, Assignment::Nonymous(String::from("overflow")) ],
-			datas: HashMap::<String, (u16, u8)>::new(),
+			datas: HashMap::<String, (u16, u16)>::new(),
 			program: [0; 4096],
 			// pcc: 0x200,
 			pcc: PROGRAM_START,
-			dpcc: DATA_SECTION,
+			// dpcc: DATA_SECTION,
+			pcd: DATA_SECTION,
 
 			send_forward: Vec::new(),
 			non_user_stack: Vec::new(),
@@ -142,13 +148,10 @@ impl State {
 
 	fn dissasign(&mut self, v: u8) {
 		println!("dissasign register {v}");
-
 		self.assignments[v as usize] = Assignment::None;
 	}
 
 	fn get(&self, name: &str) -> u8 {
-		// let mut i: u8 = 0;
-
 		for i in 0_u8..16 {
 			match &self.assignments[i as usize] {
 				Assignment::Nonymous(n) if n.eq(&name) => {
@@ -157,14 +160,12 @@ impl State {
 				}
 				_ => {}
 			}
-			// i += 1;
 		}
 
 		panic!("register variable {name} is not declared");
 	}
 
 	fn try_get(&self, name: &str) -> Option<u8> {
-
 		for i in 0_u8..16 {
 			match &self.assignments[i as usize] {
 				Assignment::Nonymous(n) if n.eq(&name) => {
@@ -173,7 +174,6 @@ impl State {
 				}
 				_ => {}
 			}
-			// i += 1;
 		}
 
 		None
@@ -193,20 +193,90 @@ impl State {
 	}
 }
 
+// use std::intrinsics::bitreverse;
+
+
+
+pub struct Flip (pub bool, pub bool);
 
 pub fn data(state: &mut State, name: &str, bytes: &[u8]) {
-	let data_start = state.dpcc;
 
-	state.datas.insert(String::from(name), (data_start, bytes.len() as u8));
+
+
+	state.datas.insert(name.to_owned(), (state.pcd, bytes.len().try_into().unwrap()));
+
 
 	for b in bytes {
-		state.program[state.dpcc as usize] = *b;
-		state.dpcc += 1;
+		state.program[state.pcd as usize] = *b;
+		state.pcd += 1;
 	}
 
-	print!("data slice starting at {data_start:#x} ");
+	// let pcd = state.pcd as usize;
+	// let len = bytes.len() as usize;
 
-	test_print_slice(&state.program[(data_start as usize)..(state.dpcc as usize)]);
+	// state.program[pcd..pcd+len].copy_from_slice(bytes);
+
+	// print!("data slice starting at {data_start:#x} ");
+	// test_print_slice(&state.program[(data_start as usize)..(state.dpcc as usize)]);
+}
+
+pub fn data_flipped(state: &mut State, name: &str, data: Valued, flip: Flip) {
+	let (pcd, len) = match data {
+	    Valued::Data(name) => {
+	    	state.datas.get(&name).expect("fuck")
+	    },
+	    Valued::Literal(character) => {
+	    	todo!();
+	    },
+	    Valued::Symbol(name) => todo!(),
+	    Valued::Register(_) => todo!(),
+	};
+
+	let mut bytes = Vec::<u8>::new();
+
+	let Flip(x, y) = flip;
+
+	if y {
+		let range = ((*pcd)..(*pcd + *len)).rev();
+		for _i in range {
+			let byte = state.program[_i as usize];
+
+			if x {
+				bytes.push(byte.reverse_bits());
+			} else {
+				bytes.push(byte);
+			}
+		}
+	} else {
+		let range = (*pcd)..(*pcd + *len);
+		for _i in range {
+			let byte = state.program[_i as usize];
+
+			if x {
+				bytes.push(byte.reverse_bits());
+			} else {
+				bytes.push(byte);
+			}
+		}			
+	}
+
+	// if let Some((pcd, len)) = state.datas.get(&_dn) {
+	// 	println!("here");
+
+	// } else {
+	// 	panic!("wtf");
+	// }
+
+
+	println!("{bytes:?}");
+
+	state.datas.insert(name.to_owned(), (state.pcd, bytes.len().try_into().unwrap()));
+
+	// lol
+	for b in bytes {
+		state.program[state.pcd as usize] = b;
+		state.pcd += 1;
+	}
 }
 
 
@@ -235,7 +305,6 @@ impl From<u8> for Valued {
 pub fn if_start(state: &mut State, condition: Option<u8>, variable: Valued) {
 	let mut b: u8;
 
-	// let x = state.get(name);
 	let x = match variable {
 	    Valued::Symbol(ref name) => state.get(name),
 	    Valued::Register(x) => x,
@@ -248,32 +317,20 @@ pub fn if_start(state: &mut State, condition: Option<u8>, variable: Valued) {
 	match condition {
 	    Some(nn) => {
 	    	// check equivalence
-
 			// 3XNN
-
-			// todo
-			// instruction!(state, 0x3, x: x, nn: nn);
-
-			b = 0x3 << 4; b |= x; state.byte_push(b);
-			b = nn; state.byte_push(b);
+			instruction!(state, 0x3, X:x, NN:nn);
 	    },
 	    None => {
-	    	// check boolness
 	    	let nn = 0x00;
-
+	    	// check boolness
 			// 4XNN
-			b = 0x4 << 4; b |= x; state.byte_push(b);
-			b = nn; state.byte_push(b);
-
-			// println!("{:?}", state.program);
-			// state.print_up();
+			instruction!(state, 0x4, X:x, NN:nn);
 	    },
 	}
 
 	// 1NNN
 	state.send_forward.push(Section::If(state.pcc));
 	state.pcc += 2;
-
 }
 
 pub fn if_end(state: &mut State) {
@@ -290,7 +347,7 @@ pub fn if_end(state: &mut State) {
 		b = nnn[1]; state.program[copy_to_addr + 1] = b;
 
 	} else {
-		panic!("syntax error: unclosed loop");
+		panic!("syntax error");
 	}
 }
 
@@ -299,106 +356,46 @@ pub fn loop_start(state: &mut State, count: Valued, name: Option<&str>) {
 	let x = match name {
 	    Some(name) => {
 			state.find_register(Assignment::from(name))
-			// state.non_user_stack.push(x);
-			// x
 	    }
 	    None => {
 	    	state.find_register(Assignment::Anonymous)
-	    	// state.non_user_stack.push(x);
-	    	// x
 	    }
 	};
 
-	let mut b: u8;
-	
-
 	// 6XNN
 	instruction!(state, 0x6, X:x, NN:0x0);
-	// let nn = 0x00;
-	// b = 0x6 << 4; b |= x; state.byte_push(b);
-	// b = nn; state.byte_push(b);
-
 
 	state.non_user_stack.push(x);
 	state.send_forward.push(Section::Loop(state.pcc, count));
-
-
-	// match count {
-	//     Valued::Literal(nn) => {
-
-	// 		// 4XNN
-	// 		b = 0x4 << 4; b = b | x; state.byte_push(b);
-	// 		b = nn; state.byte_push(b);	    	
-	//     }
-	//     Valued::Symbol(ref name) => {
-	//     	let y = state.get(name);
-
-	// 		// 9XY0
-	// 		b = 0x9 << 4; b |= x; state.byte_push(b);
-	// 		b = y << 4; b |= 0x0; state.byte_push(b);
-
-	//     }
-	//     Valued::Data(_) => panic!(),
-	//     Valued::Register(_) => panic!(),
-	// }
-	
-
-
-	// >> 1NNN
-	// state.pcc += 2;
 }
 
 pub fn loop_end(state: &mut State) {
-	let s = state.send_forward.pop().expect("e");
+	let s = state.send_forward.pop().expect("closing loop no opener");
 
 	if let Section::Loop(jump_back_addr, count) = s {
-
-
-		// let mut b: u8;
 
 		// 7XNN
 		let loop_reg = state.non_user_stack.pop().expect("same error as above gr");
 		instruction!(state, 0x7, X:loop_reg, NN:1);
 
-		// let nn = 1;
-		// let x = loop_reg;
-		// b = 0x7 << 4; b |= x; state.byte_push(b);
-		// b = nn; state.byte_push(b);
-
-
 		// test
 		match count {
 		    Valued::Literal(nn) => {
-				let x = loop_reg;
-
 				// 3XNN skip if equal
-				instruction!(state, 0x3, X:x, NN:nn);
-				// b = 0x3 << 4; b = b | x; state.byte_push(b);
-				// b = nn; state.byte_push(b);	    	
+				instruction!(state, 0x3, X:loop_reg, NN:nn);
 		    }
 		    Valued::Symbol(ref name) => {
 		    	let y = state.get(name);
 		    	let x = loop_reg;
 
 				// 5XY0 skip if equal
-
 				instruction!(state, 0x5, X:x, Y:y, 0x0);
-				// b = 0x5 << 4; b |= x; state.byte_push(b);
-				// b = y << 4; b |= 0x0; state.byte_push(b);
-
 		    }
 		    _ => todo!()
-		    // Valued::Data(_) => panic!(),
-		    // Valued::Register(_) => panic!(),
 		}
 		
-		
-
 		// 1NNN
 		instruction!(state, 0x1, NNN:jump_back_addr);
-		// let nnn = jump_back_addr.to_be_bytes();
-		// b = 0x1 << 4; b |= nnn[0]; state.byte_push(b);
-		// b = nnn[1]; state.byte_push(b);
 
 		// still dissasigns it if the symbol existed before the loop
 		state.dissasign(loop_reg);
@@ -408,9 +405,34 @@ pub fn loop_end(state: &mut State) {
 	}
 }
 
-pub fn while_loop_start() {}
-pub fn while_loop_end() {}
-pub fn loop_break() {}
+pub fn while_loop_start(state: &mut State) {
+	state.non_user_stack.push(16);
+	state.send_forward.push(Section::Loop(state.pcc, Valued::Register(0)));
+}
+
+pub fn while_loop_end(state: &mut State, condition: Valued) {
+
+	state.non_user_stack.pop().expect("uh");
+	let s = state.send_forward.pop().expect("uh");
+
+	if let Section::Loop(loop_start, _) = s {
+
+		match condition {
+			Valued::Symbol(name) => {
+				let x = state.get(&name);
+				instruction!(state, 0x4, X:x, NN:0x0);
+			}
+			_ => panic!()
+		}
+
+		instruction!(state, 0x1, NNN:loop_start);
+	} else {
+		panic!();
+	}
+}
+
+// would need a global break stack
+// pub fn loop_break() {}
 
 
 
@@ -682,30 +704,24 @@ pub fn operate(state: &mut State, variable: Valued, operator: Ops, operand: Valu
 	    Ops::BitOr => todo!(),
 	    Ops::BitXor => todo!(),
 	}
-
-
-
 }
 
 // todo optimize by moving "set index register" out of the loop
+
+
 
 pub fn draw(state: &mut State, data: Valued, xval: Valued, yval: Valued, rows: Valued) {
 	let emit_start = state.pcc;
 
 
 	let x = match xval {
-		Valued::Literal(xval) => {
+		Valued::Literal(nn) => {
 			let mut b: u8;
 
 			// 6XNN
 			let x = state.find_register(Assignment::Anonymous);
-			let nn = xval;
-			
+			// let nn = xval;			
 			instruction!(state, 0x6, X:x, NN:nn);
-
-			// b = 0x6 << 4; b = b | x; state.byte_push(b);
-			// b = nn; state.byte_push(b);
-
 			x
 		},
 		Valued::Symbol(ref name) => {
@@ -772,14 +788,13 @@ pub fn draw(state: &mut State, data: Valued, xval: Valued, yval: Valued, rows: V
 
 			// emit a warning if the number of rows is off 
 			if let Valued::Literal(rows) = rows {
-				if rows > count {
+				if rows  as u16 > count {
+
 					// panic!("waring: drawing too much rows");
 					// panic!()
 					eprintln!("waring: drawing too many rows");
 				}
 			}
-
-
 
 			instruction!(state, 0xA, NNN:nnn);
 
