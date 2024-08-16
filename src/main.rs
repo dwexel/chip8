@@ -1,27 +1,14 @@
 // total 4096 bytes (000-FFF)
-// 
 // first 512 are empty (000-1FF)
-// 
 // except for the font
-//
 // so the program starts at 0x200
-//
 // only 12 bytes are required to address the 4096 bytes of memory
-//
 // but in practice, 16-bit numbers are used as addresses
 
 
-
-
 // a nibble is half a byte (0-F)
-//
 // an instruction is two bytes and thus four nibbles (0000-FFFF)
-
-
 // instructions are separated into broad catergories based on their first nibble (half octet)
-//
-//
-
 // which by the first we mean most significant
 
 
@@ -31,48 +18,22 @@
 
 
 
-
-
-
 // the main loop should execute at around 700 instructions per second
-//
 // the timer should loop independently and should decrement at
 // 60 times a second
 
-
-
-
-// also
+// also: 
 // 2-byte program counter
 // 16 one-byte registers (V0-VF)
 
 
-
-// #![feature(macro_metavar_expr)]
-
 #![allow(unused)]
-
 
 use std::{env, fs::File, io::{self, Read}, process::exit, time::{Duration, SystemTime}};
 
-
-
 mod rewrite;
 
-
-// macro_rules! data {
-// 	($($e:expr)*) => {{
-// 		let data: [ u8; ${count($e)} ] = [ $( $e, )* ];
-// 		data
-// 	}};
-// }
-
-
-
-
-
 const DB: bool = true;
-
 
 macro_rules! db {
 	($fmt_str:expr) => {
@@ -89,14 +50,11 @@ macro_rules! db {
 	};
 }
 
-
-
 fn test_draw_display(d: &[u64; 32]) {
 	for line_64 in d {
 		let s = format!("{:066b}", line_64)
 			.replace('0', " ")
 			.replace('1', "#");
-
 
 		println!("{}", s);
 	}
@@ -122,7 +80,6 @@ fn test_print_slice(s: &[u8]) {
 fn test_print_slice_as_u16(s: &[u8]) {
 	let mut i = 0;
 	loop {
-		// 
 		if i >= (s.len() - 1) { break; }
 
 		let byte = u16::from_be_bytes([s[i], s[i+1]]);
@@ -136,7 +93,6 @@ fn test_print_slice_as_u16(s: &[u8]) {
 
 struct Stack {
 	// in reality these are 16 bit numbers
-
 	stack: [usize; 16],
 	pointer: usize
 }
@@ -158,8 +114,7 @@ impl Stack {
 
 
 // bits 0-63
-// 0 = most significant, 63 = least
-// if x > 63, panics
+// 0 = most significant, 63 = least. if x > 63, panics
 
 fn check_bit_64(row: u64, x: u8) -> bool {
 	let shl = 63 - x;
@@ -210,21 +165,6 @@ fn from_bit_array(bits: &[bool]) -> u8 {
 	ret
 }
 
-// insert an instruction into the chunk
-
-// fn place(instruction: u16, pc: &mut usize, chunk: &mut [u8; 4096]) {
-// 	// let wh = wh as usize;
-
-// 	chunk[(*pc)..(*pc)+2].copy_from_slice(
-// 		&u16::to_be_bytes(instruction)
-// 	);
-
-// 	// *pc += 2;
-// }
-
-
-
-
 // the PC is at a location
 // load two bytes from there, then increment PC by two bytes
 
@@ -234,12 +174,10 @@ fn fetch(pc: &mut usize, chunk: &[u8; 4096]) -> u16 {
 	);
 
 	*pc += 2;
-
 	instruction
 }
 
 // decode and execute after fetching
-
 fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, pc: &mut usize, chunk: &mut [u8], stack: &mut Stack, t: &mut u8, st: &mut u8) {
 	// byte order big endian here
 
@@ -477,6 +415,7 @@ fn decode(instruction: u16, d: &mut[u64; 32], v: &mut [u8; 16], i: &mut usize, p
 
 			v[0xF] = 0;
 
+// for <item> in chunk.iter().skip((*i)).take((n as usize)) {
 			for _i in (*i)..(*i+(n as usize)) {
 
 				if y == 32 { break; }
@@ -668,19 +607,22 @@ fn main() {
 	let mut state = State::new();
 
 	data(&mut state, "g", &[0b11110011, 0b11110011, 0b11110011, 0b11000011, 0b11000011, 0b11000011, 0b11000011, 0b11000011]);
-
 	data_flipped(&mut state, "gg", Valued::Data("g".into()), Flip(true, true));
-
-
 
 	assign(&mut state, Valued::from("m1"), Valued::Literal(5));
 	assign(&mut state, Valued::from("m2"), Valued::Literal(5));	
-	operate(&mut state, Valued::from("m1"), Ops::Multiply, Valued::from("m2"));
+	assign(&mut state, Valued::from("m2"), Valued::Expression(
+		vec![
+			(Valued::from(1), Ops::Add), (Valued::from(1), Ops::Add)
+		]
+	));
+	
+	// if_start(&mut State, )
 
-	// draw(&mut state, Valued::from(0xA), Valued::from("m1"), Valued::from("m2"), Valued::from(5));
+		// draw(&mut state, Valued::from(0xA), Valued::from("m1"), Valued::from("m2"), Valued::from(5));
 
-	draw(&mut state, Valued::Data(String::from("g")), Valued::from("m2"), Valued::from("m1"), Valued::from(8));
-	draw(&mut state, Valued::Data(String::from("gg")), Valued::from(20), Valued::from(20), Valued::from(8));
+	// draw(&mut state, Valued::Data(String::from("g")), Valued::from("m2"), Valued::from("m1"), Valued::from(8));
+	// draw(&mut state, Valued::Data(String::from("gg")), Valued::from(20), Valued::from(20), Valued::from(8));
 
 	state.copy_program_to_memory(&mut chunk);
 
@@ -688,11 +630,6 @@ fn main() {
 	// if_keydown
 
 	test_print_slice_as_u16(&chunk[pc..pc+60]);
-
-
-	// 8XY6
-	// 8XYE
-
 
 
 	if let Some(fname) = env::args().nth(1) {
@@ -737,19 +674,14 @@ fn main() {
 				}
 
 				decode(instruction, &mut display, &mut v0vf, &mut i_r, &mut pc, &mut chunk, &mut stack, &mut timer, &mut sound_timer);
-				test_draw_display(&display);
+				// test_draw_display(&display);
 				test_print_registers(&v0vf);
-
 			}
 			_ => ()
 		}
 
 	}
 }
-
-
-
-
 
 	// 00E0 (clear screen)
 	// 1NNN (jump)
